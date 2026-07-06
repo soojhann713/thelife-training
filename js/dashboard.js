@@ -857,12 +857,12 @@ function renderAssignTable() {
       const totalRate = total > 0 ? (done / total) * 100 : 0;
       return { name, doneDue, rate, totalRate };
     });
-    rows.sort((a, b) => (b.rate !== a.rate ? b.rate - a.rate : a.name.localeCompare(b.name, "ko")));
+    rows.sort((a, b) => a.name.localeCompare(b.name, "ko"));
 
     html += `<div class="assign-course">
       <h3 class="assign-course-h">${esc(label)} <span class="card-meta">${esc(courseLabel)} · 마감 도래 ${dueSoFar} / 전체 ${total}</span></h3>
       <table class="qt-table"><thead><tr>
-        <th class="caret-cell"></th><th>순위</th><th>성함</th><th>완료(마감도래)</th><th>완주율 (전체)</th></tr></thead><tbody>`;
+        <th class="caret-cell"></th><th>번호</th><th>성함</th><th>완료(마감도래)</th><th>완주율 (전체)</th></tr></thead><tbody>`;
     rows.forEach((r, i) => {
       const color = rateColor(r.rate);
       html += `<tr class="qt-row assign-row" data-name="${esc(r.name)}" title="클릭하면 과제 체크">
