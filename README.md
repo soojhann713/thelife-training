@@ -22,7 +22,7 @@ scripts/                          GitHub Actions 작업 (Node)
   collect-daily.js                신규 글 수집(본문 포함)
   collect-history.js              과거 글(올해치) 수집 — 페이지네이션
   backfill-content.js             기존 글 본문 일괄 채움
-  seed-members.js / set-admin.js / manage-class.js / dedupe-posts.js   관리 도구
+  seed-members.js / set-admin.js / manage-class.js / seed-course.js / dedupe-posts.js   관리 도구
   test/                           단위 테스트 (큐티 파서)
 .github/workflows/
   ci.yml                          PR/푸시 검증(문법·의존성·테스트)
@@ -108,6 +108,14 @@ Firebase Auth 계정 하나에 대응하며, 로그인 이메일은 반 id 로�
 - 커리큘럼(과제 정의)은 **RTDB `/courses/<courseId>`** 에 저장되고, 관리자가 웹의 **📚 커리큘럼 관리**
   화면에서 편집합니다(과제 추가/삭제·과제명·종류·그룹·키워드·순서·마감일). 코드
   [`js/assignments.js`](./js/assignments.js) 의 `COURSES` 는 `/courses` 가 비었을 때 쓰는 **초기 시드**입니다.
+- 코드 시드를 **이미 운영 중인 `/courses` 에 반영**하려면 **Actions → Admin Tools → `seed-course`** 를
+  씁니다(예: 예배은혜나눔 74개처럼 손으로 넣기엔 많은 과제를 추가할 때).
+  기본은 **덮어쓰기가 아니라 병합**입니다 — 시드에만 있는 과제는 추가하고, 이미 있는 과제와
+  관리자가 직접 추가한 과제는 건드리지 않습니다(웹에서 손본 제목·키워드·마감일을 지키기 위해).
+  `dry`(기본 켜짐)로 **무엇이 바뀔지 먼저 확인**하고, 실제로 쓸 때 끄세요.
+  `course` 로 한 과정만, `force` 로 기존 과제까지 시드 값으로 덮어쓰기, `prune` 으로 시드에 없는
+  과제 삭제(`force` 와 함께만 의미 있음)를 지정합니다. 과제 id 는 절대 새로 만들지 않습니다
+  (`assignments/<이름>/<과제id>` 체크 기록과 연결돼 있어서).
 - **마감일은 반별로 다르게** 지정할 수 있습니다: 커리큘럼 관리에서 ‘마감일 편집 대상’으로 반을 고르면
   그 반의 마감일(`classes/<반id>/due/<과제id>`)을 입력합니다(비우면 커리큘럼 기본값 사용).
   → 같은 커리큘럼을 쓰는 **사역 토요반/일요반**이 과제·키워드는 공유하고 **마감일만** 각자 갖습니다.

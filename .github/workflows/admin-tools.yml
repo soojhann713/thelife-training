@@ -17,6 +17,7 @@ on:
           - class-delete      # 반(또는 관리자) 계정 삭제
           - dedupe-posts      # 중복 글(num) 제거
           - diagnose          # 데이터 진단(월 분포/과거글/중복) 출력만
+          - seed-course       # 커리큘럼(assignments.js)을 /courses 에 병합 — course/force/prune/dry 사용
       admin_email:
         description: "set-admin/revoke-admin 시 대상 이메일"
         required: false
@@ -41,12 +42,26 @@ on:
         description: "dedupe-posts 시 특정 멤버만 (비우면 전체)"
         required: false
         default: ""
+      course:
+        description: "seed-course 시 특정 과정만 (disciple11 / ministry, 비우면 전체)"
+        required: false
+        default: ""
+      dry:
+        description: "seed-course 시 쓰지 않고 변경 예정만 출력(DRY) — 먼저 이걸로 확인하세요"
+        type: boolean
+        required: false
+        default: true
+      prune:
+        description: "seed-course 시 시드에 없는 과제 삭제(PRUNE). force 와 함께만 의미 있음"
+        type: boolean
+        required: false
+        default: false
       day:
         description: "diagnose 시 특정 수집일 (KST, YYYY-MM-DD)"
         required: false
         default: ""
       force:
-        description: "seed-members 시 기존 값 덮어쓰기(FORCE)"
+        description: "기존 값 덮어쓰기(FORCE) — seed-members / seed-course 공용"
         type: boolean
         required: false
         default: false
@@ -72,6 +87,9 @@ jobs:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           ADMIN_EMAIL: ${{ inputs.admin_email }}
           MEMBER: ${{ inputs.member }}
+          COURSE: ${{ inputs.course }}
+          DRY: ${{ inputs.dry && '1' || '' }}
+          PRUNE: ${{ inputs.prune && '1' || '' }}
           DAY: ${{ inputs.day }}
           FORCE: ${{ inputs.force && '1' || '' }}
           REVOKE: ${{ inputs.action == 'revoke-admin' && '1' || '' }}
@@ -88,5 +106,6 @@ jobs:
             class-create|class-admin|class-delete) npm run manage:class ;;
             dedupe-posts) npm run dedupe:posts ;;
             diagnose) npm run diagnose ;;
+            seed-course) npm run seed:course ;;
             *) echo "알 수 없는 작업"; exit 1 ;;
           esac
