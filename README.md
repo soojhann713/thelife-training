@@ -1,6 +1,4 @@
-# jeja-pepero (제자 페페로)
-
-교회 소그룹 **큐티(QT) 완주 모니터링** 서비스.
+# 교회 소그룹 **큐티(QT) 완주 모니터링** 서비스.
 
 - **웹 대시보드**: 바닐라 HTML/JS + Firebase Authentication, **GitHub Pages** 호스팅
 - **자동 수집**: **GitHub Actions** 스케줄 → 게시판 스크래핑 → Firebase RTDB (결과는 대시보드에서 조회)
