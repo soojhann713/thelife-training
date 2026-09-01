@@ -29,7 +29,8 @@ function sameTask(a, b) {
   const arr = (v) => JSON.stringify(Array.isArray(v) ? v : []);
   return a.title === b.title && a.kind === b.kind && a.group === b.group
     && (a.due || "") === (b.due || "") && a.order === b.order
-    && arr(a.m) === arr(b.m) && arr(a.x) === arr(b.x);
+    && arr(a.m) === arr(b.m) && arr(a.x) === arr(b.x)
+    && (a.serviceDate || "") === (b.serviceDate || "");
 }
 
 async function main() {

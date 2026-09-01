@@ -281,9 +281,32 @@ export function sermonItems(prefix, startISO, endISO) {
   return out;
 }
 
+const serviceOf = (dateISO) => (parseISO(dateISO).getUTCDay() === 5 ? "금요" : "주일");
+
+/**
+ * 설교간증 과제의 예배일·구분을 돌려줍니다. 설교간증이 아니면 null.
+ *
+ * ⚠️ `/courses` 의 과제 스키마에는 service·serviceDate 자리가 없어서, RTDB 에 저장했다 읽으면
+ * 두 값이 사라집니다. 그러면 매칭이 통째로 멈추므로 **id(`…sermon-MMDD`)와 마감일에서 되살립니다.**
+ * 덕분에 이미 심어둔 커리큘럼도 다시 시드하지 않고 동작합니다.
+ */
+export function sermonFields(task) {
+  if (!task || task.kind !== SERMON_KIND) return null;
+  if (task.serviceDate) {
+    return { serviceDate: task.serviceDate, service: task.service || serviceOf(task.serviceDate) };
+  }
+  const m = /sermon-(\d{2})(\d{2})$/.exec(task.id || "");
+  const year = Number(String(task.due || "").slice(0, 4));
+  if (!m || !year) return null;
+  let serviceDate = `${year}-${m[1]}-${m[2]}`;
+  // 제출일은 예배 다음 주일이라, 연말 예배는 마감일보다 한 해 앞섭니다.
+  if (serviceDate > task.due) serviceDate = `${year - 1}-${m[1]}-${m[2]}`;
+  return { serviceDate, service: serviceOf(serviceDate) };
+}
+
 /** 설교간증 과제인지. */
 export function isSermonTask(task) {
-  return !!task && task.kind === SERMON_KIND && !!task.serviceDate;
+  return !!sermonFields(task);
 }
 
 /** 제목에서 'M월 D일' / 'M.D' / 'M/D' 형태의 날짜를 뽑아 해당 연도의 ISO 로. */
@@ -308,7 +331,10 @@ export function sermonDateFromTitle(title, year) {
  * 반환: { [taskId]: post }
  */
 export function matchSermonPosts(tasks, posts) {
-  const sermons = tasks.filter(isSermonTask);
+  // RTDB 에서 온 과제는 service·serviceDate 가 없으므로 여기서 되살려 씁니다(sermonFields 참고).
+  const sermons = tasks
+    .map((t) => { const f = sermonFields(t); return f ? { ...t, ...f } : null; })
+    .filter(Boolean);
   if (!sermons.length || !posts.length) return {};
 
   const norm = (s) => String(s ?? "").replace(/\s+/g, "");
@@ -375,10 +401,13 @@ export function courseAssignments(course) {
 export function courseSeed(course) {
   const tasks = {};
   courseAssignments(course).forEach((it, i) => {
-    tasks[it.id] = {
+    const task = {
       title: it.title, kind: it.kind, group: it.group || "",
       order: i, due: it.due || "", m: it.m || [], x: it.x || [],
     };
+    // 설교간증은 예배일·구분이 매칭에 필요합니다(없으면 id 에서 되살리지만, 명시가 낫습니다).
+    if (it.serviceDate) { task.serviceDate = it.serviceDate; task.service = it.service || ""; }
+    tasks[it.id] = task;
   });
   return { label: course.label, tasks };
 }
