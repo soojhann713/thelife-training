@@ -13,7 +13,8 @@
     "manage:class": "node manage-class.js",
     "dedupe:posts": "node dedupe-posts.js",
     "diagnose": "node diagnose.js",
-    "test": "node --test"
+    "test": "node --test",
+    "seed:course": "node seed-course.js"
   },
   "engines": {
     "node": ">=20"

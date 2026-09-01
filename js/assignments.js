@@ -99,10 +99,11 @@ function readingItems(rows, prefix) {
   }));
 }
 
-// 방학 과제 '담임목사 로마서 강해'는 1~8강짜리라 강별로 하나씩 둡니다.
-function romansVideoItems(prefix) {
+// 방학 과제 '담임목사 로마서 강해'는 강별로 하나씩 둡니다.
+// 반마다 맡는 구간이 다릅니다 — 제자반 1~8강, 사역반 9~16강.
+function romansVideoItems(prefix, from) {
   return Array.from({ length: 8 }, (_, i) => {
-    const n = i + 1;
+    const n = from + i;
     return {
       id: `${prefix}vac-video${n}`, kind: "기타",
       title: `담임목사 로마서 강해 ${n}강 시청`, due: d(9, 6),
@@ -136,7 +137,7 @@ const DISCIPLE11_GROUPS = [
     items: [
       { id: "vac-read", kind: "독서", title: "다시보는 로마서 (박영선, 무근검)", due: d(9, 6),
         m: ["다시보는로마서"], x: [] },
-      ...romansVideoItems(""),
+      ...romansVideoItems("", 1),
     ],
   },
   {
@@ -217,7 +218,7 @@ const MINISTRY_GROUPS = [
     items: [
       { id: "m-vac-read", kind: "독서", title: "다시보는 히브리서 (박영선/무근검)", due: d(9, 6),
         m: ["다시보는히브리서", "히브리서"], x: [] },
-      ...romansVideoItems("m-"),
+      ...romansVideoItems("m-", 9),
     ],
   },
   {
