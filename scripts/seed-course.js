@@ -10,7 +10,10 @@
 // 환경변수:
 //   COURSE=<id>  특정 과정만 (예: disciple11, ministry). 비우면 전체
 //   FORCE=1      양쪽에 있는 과제도 시드 값으로 덮어씀 (제목·종류·그룹·순서·키워드·마감일)
-//   PRUNE=1      시드에 없는 과제를 삭제 (FORCE 와 함께 쓸 때만 의미 있음 — 기본 꺼짐)
+//   PRUNE=1      시드에 없는 과제를 삭제 (FORCE 와 무관하게 단독으로 동작 — 기본 꺼짐)
+//                과제를 쪼개거나 이름을 바꿔 옛 id 가 남았을 때 씁니다.
+//                DRY 로 '시드에 없는 항목' 목록을 먼저 확인하고 켜세요 —
+//                관리자가 웹에서 직접 추가한 과제도 시드에 없으면 지워집니다.
 //   DRY=1        쓰지 않고 무엇이 바뀌는지만 출력
 import { initDb } from "./lib/firebase.js";
 import { COURSES, courseSeed } from "../js/assignments.js";
