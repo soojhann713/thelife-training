@@ -19,7 +19,12 @@ import {
   COURSES,
   courseSeed,
   assignKindColor,
+  SERMON_CATEGORY,
+  isSermonTask,
+  matchSermonPosts,
 } from "./assignments.js";
+import { initExport, cohortOf, docTitleFor, fileNameFor } from "./hwpx/export-ui.js";
+import { toParagraphs } from "./hwpx/compile.js";
 
 function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g, (c) => (
@@ -648,10 +653,18 @@ function trainingPosts(name) {
     .map((p) => ({ post: { ...p, name, category: "훈련나눔" }, n: normTitle(p.title) }));
 }
 
+// 멤버의 [예배은혜나눔] 글 목록 — 설교간증은 이 카테고리에서 날짜로 맞춥니다.
+function sermonPosts(name) {
+  return (postsByName[name] || [])
+    .filter((p) => p && p.title && categorize(p.title) === SERMON_CATEGORY)
+    .map((p) => ({ ...p, name, category: SERMON_CATEGORY }));
+}
+
 // 반별 섹션({tasks, names})을 받아 멤버별 자동 매칭(autoAssign) 구성.
 function buildAutoAssign(sections) {
   autoAssign = {};
   for (const { tasks, names } of sections) {
+    const sermonTasks = tasks.filter(isSermonTask);
     for (const name of names) {
       const tps = trainingPosts(name);
       const map = {};
@@ -662,6 +675,8 @@ function buildAutoAssign(sections) {
           if (it.m.some((k) => tp.n.includes(k))) { map[it.id] = tp.post; break; }
         }
       }
+      // 설교간증은 제목이 매주 달라 키워드가 없으므로 카테고리+날짜로 따로 맞춥니다.
+      if (sermonTasks.length) Object.assign(map, matchSermonPosts(sermonTasks, sermonPosts(name)));
       autoAssign[name] = map;
     }
   }
@@ -1061,14 +1076,75 @@ function wireChrome() {
   });
   document.getElementById("assign-modal-save").addEventListener("click", saveAssign);
   document.getElementById("assign-modal-uncheck").addEventListener("click", uncheckAssign);
+  initExport(exportContext());
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
     // 위에 떠 있는 모달부터 닫기
+    const exportModal = document.getElementById("export-modal");
+    if (exportModal && !exportModal.hidden) { exportModal.hidden = true; return; }
     if (!document.getElementById("assign-modal").hidden) { closeAssignModal(); return; }
     if (!document.getElementById("post-modal").hidden) { closeModal(); return; }
     if (!document.getElementById("week-modal").hidden) { closeWeekModal(); return; }
     setSidebar(false);
   });
+}
+
+/* ===================== 과제 취합문서 내보내기 ===================== */
+// 글 제목 앞의 분류 태그([예배은혜나눔] 등)를 떼어냅니다 — 양식의 '제목' 칸에는 태그가 없습니다.
+function stripCategoryTag(title) {
+  return String(title ?? "").replace(/^\s*[[(【][^\])】]*[\])】]\s*/, "").trim();
+}
+
+// 내보내기 모달에 넘길 데이터 제공자. 대시보드가 이미 들고 있는 상태만 씁니다(추가 조회 없음).
+function exportContext() {
+  const activeOf = (classId) =>
+    memberList.filter((m) => m.active && memberClassId(m) === classId)
+      .sort((a, b) => a.name.localeCompare(b.name, "ko"));
+
+  const tasksOf = (classId) => {
+    const cls = classesById[classId];
+    return effectiveTasks(cls ? cls.courseId : classId, classId);
+  };
+
+  return {
+    listClasses() {
+      const ids = [...new Set(memberList.filter((m) => m.active).map(memberClassId))];
+      return ids
+        .filter((id) => tasksOf(id).length)
+        .map((id) => ({ id, label: classLabelOf(id) }))
+        .sort((a, b) => a.label.localeCompare(b.label, "ko"));
+    },
+
+    listTasks(classId) {
+      return tasksOf(classId).filter((t) => t.due).sort((a, b) => (a.due < b.due ? 1 : -1));
+    },
+
+    buildDoc(classId, taskId) {
+      const task = tasksOf(classId).find((t) => t.id === taskId);
+      if (!task) throw new Error("과제를 찾지 못했습니다");
+      const members = activeOf(classId);
+      if (!members.length) throw new Error("이 반에 수집 대상 멤버가 없습니다");
+
+      const cohort = cohortOf(classLabelOf(classId));
+      const rows = members.map((m) => {
+        const post = (autoAssign[m.name] || {})[taskId];
+        const manual = assignContent((assignStatus[m.name] || {})[taskId]);
+        const body = (post && post.content) || manual || "";
+        // 설교간증만 멤버별 글 제목을 씁니다. 나머지는 과제명이 전원 동일합니다.
+        const title = post
+          ? (isSermonTask(task) ? stripCategoryTag(post.title) : task.title)
+          : (manual ? task.title : "");
+        return { 이름: m.name, 제목: title, 본문: body ? toParagraphs(body) : [] };
+      });
+
+      return {
+        문서제목: docTitleFor(task.kind, cohort),
+        제출일: task.due,
+        rows,
+        파일명: fileNameFor(cohort, task.kind, task.due),
+      };
+    },
+  };
 }
 
 /* ===================== 멤버 관리 (관리자 = 전체 / 일반 반 = 자기 반) ===================== */

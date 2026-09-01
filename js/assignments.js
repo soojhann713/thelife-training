@@ -221,13 +221,133 @@ const MINISTRY_GROUPS = [
   },
 ];
 
+// ===== 설교간증 (주 2회: 금요예배 / 주일예배) =====
+// 개강~종강 사이 매주 금·주일 예배 말씀에 대한 간증을 제출합니다(방학 포함).
+// 제출일은 그 예배 다음에 오는 주일입니다. 예) 4/26(주일) 설교 → 5/3 제출.
+//
+// 제목이 매주 바뀌는 설교 제목 그 자체라 키워드(m) 매칭이 불가능합니다.
+// 대신 [예배은혜나눔] 카테고리 + 예배 날짜로 맞춥니다 (matchSermonPosts 참고).
+
+export const SERMON_CATEGORY = "예배은혜나눔";
+export const SERMON_KIND = "설교간증";
+
+const DAY_MS = 86400000;
+const iso = (dt) => dt.toISOString().slice(0, 10);
+const parseISO = (s) => new Date(`${s}T00:00:00Z`);
+const addDays = (s, n) => iso(new Date(parseISO(s).getTime() + n * DAY_MS));
+
+/** 그 날짜 다음에 오는 주일(같은 날이 주일이면 7일 뒤). */
+function nextSunday(dateISO) {
+  const dow = parseISO(dateISO).getUTCDay();
+  return addDays(dateISO, dow === 0 ? 7 : 7 - dow);
+}
+
+/**
+ * 개강~종강 사이의 모든 금요·주일 예배에 대한 설교간증 과제를 만듭니다.
+ * 제출일이 종강일을 넘는 예배는 제출할 자리가 없으므로 뺍니다.
+ */
+export function sermonItems(prefix, startISO, endISO) {
+  const out = [];
+  const end = parseISO(endISO).getTime();
+  for (let t = parseISO(startISO).getTime(); t <= end; t += DAY_MS) {
+    const day = iso(new Date(t));
+    const dow = new Date(t).getUTCDay();
+    if (dow !== 0 && dow !== 5) continue; // 주일(0) / 금요일(5) 만
+    const due = nextSunday(day);
+    if (parseISO(due).getTime() > end) continue;
+    const service = dow === 0 ? "주일" : "금요";
+    const [, mm, dd] = day.split("-");
+    out.push({
+      id: `${prefix}sermon-${mm}${dd}`,
+      kind: SERMON_KIND,
+      title: `${+mm}월 ${+dd}일 ${service}예배 말씀`,
+      due,
+      service,          // "금요" | "주일"
+      serviceDate: day, // 예배가 있었던 날
+      m: [], x: [],     // 키워드 매칭 대상이 아님
+    });
+  }
+  return out;
+}
+
+/** 설교간증 과제인지. */
+export function isSermonTask(task) {
+  return !!task && task.kind === SERMON_KIND && !!task.serviceDate;
+}
+
+/** 제목에서 'M월 D일' / 'M.D' / 'M/D' 형태의 날짜를 뽑아 해당 연도의 ISO 로. */
+export function sermonDateFromTitle(title, year) {
+  const norm = String(title ?? "").replace(/\s+/g, "");
+  const m = norm.match(/(?<!\d)(\d{1,2})[월./-](\d{1,2})/);
+  if (!m) return "";
+  const mm = +m[1], dd = +m[2];
+  if (mm < 1 || mm > 12 || dd < 1 || dd > 31) return "";
+  return `${year}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
+}
+
+/**
+ * 한 멤버의 [예배은혜나눔] 글들을 설교간증 과제에 배정합니다.
+ * 글 하나는 과제 하나에만 붙습니다 — 확신이 큰 짝부터 차례로 확정합니다.
+ *
+ *   3점 = 제목의 날짜가 예배일과 일치          (가장 확실)
+ *   2점 = 제목에 '금요'/'주일'이 있고 게시일이 구간 안
+ *   1점 = 게시일만 구간 안
+ *
+ * posts: [{ title, postDate('YYYY.MM.DD' 또는 'YYYY-MM-DD'), ... }]
+ * 반환: { [taskId]: post }
+ */
+export function matchSermonPosts(tasks, posts) {
+  const sermons = tasks.filter(isSermonTask);
+  if (!sermons.length || !posts.length) return {};
+
+  const norm = (s) => String(s ?? "").replace(/\s+/g, "");
+  const toISO = (d) => String(d ?? "").replace(/\./g, "-").slice(0, 10);
+
+  const cands = [];
+  for (const task of sermons) {
+    // 예배 하루 전부터 제출일까지 올라온 글을 후보로 봅니다.
+    const from = addDays(task.serviceDate, -1);
+    const to = task.due;
+    for (const post of posts) {
+      const title = norm(post.title);
+      const posted = toISO(post.postDate);
+      let score = 0;
+      const year = task.serviceDate.slice(0, 4);
+      if (sermonDateFromTitle(post.title, year) === task.serviceDate) score = 3;
+      else if (posted >= from && posted <= to) {
+        score = title.includes(task.service) ? 2 : 1;
+      }
+      if (score) cands.push({ score, task, post, posted });
+    }
+  }
+
+  // 점수 높은 순 → 게시일 빠른 순으로 확정
+  cands.sort((a, b) => b.score - a.score || a.posted.localeCompare(b.posted));
+  const byTask = {};
+  const used = new Set();
+  for (const c of cands) {
+    if (byTask[c.task.id] || used.has(c.post)) continue;
+    byTask[c.task.id] = c.post;
+    used.add(c.post);
+  }
+  return byTask;
+}
+
 // ===== 훈련과정(코스) 시드 레지스트리 =====
 // 여기 정의는 RTDB /courses 가 비어 있을 때의 '초기 시드'입니다. 실제 운영 데이터는
 // /courses 에 저장되며 웹 '커리큘럼 관리'에서 편집합니다. 기존 과제 id 는 바꾸지 마세요
 // (assignments/<이름>/<과제id> 체크 기록과 연결됨).
+// 설교간증은 개강~종강 사이 전 주차를 날짜에서 그대로 만들어 냅니다(방학 포함).
+const SERMON_START = d(3, 8);   // 개강
+const SERMON_END = d(11, 22);   // 종강
+const sermonGroup = (prefix) => ({
+  label: "설교간증 (매주 금·주일)",
+  items: sermonItems(prefix, SERMON_START, SERMON_END),
+});
+
 export const COURSES = [
-  { id: "disciple11", label: "제자반 11기 (주일반)", groups: DISCIPLE11_GROUPS },
-  { id: "ministry", label: "사역반 9기", groups: MINISTRY_GROUPS },
+  { id: "disciple11", label: "제자반 11기 (주일반)", groups: [...DISCIPLE11_GROUPS, sermonGroup("d11")] },
+  { id: "ministry", label: "사역반 9기", groups: [...MINISTRY_GROUPS, sermonGroup("m")] },
 ];
 
 export function findCourse(id) {
@@ -256,5 +376,6 @@ export function courseSeed(course) {
 export function assignKindColor(kind) {
   return kind === "생활간증" ? ["#ecfdf5", "#047857"]
     : kind === "독서" ? ["#eef2ff", "#3548b5"]
+    : kind === SERMON_KIND ? ["#fdf2f8", "#9d174d"]
     : ["#fef3c7", "#b45309"];
 }

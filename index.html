@@ -76,7 +76,10 @@
           <section class="card">
             <div class="card-head">
               <h2 id="assign-title">📝 과제 완주 현황</h2>
-              <span id="assign-meta" class="card-meta"></span>
+              <div class="qt-head-right">
+                <button id="export-open" type="button" class="btn btn-ghost">📄 취합문서 내보내기</button>
+                <span id="assign-meta" class="card-meta"></span>
+              </div>
             </div>
             <div id="assign-table-wrap" class="table-wrap">
               <p class="muted">불러오는 중…</p>
@@ -138,6 +141,28 @@
           <div id="modal-body" class="modal-body"></div>
           <div class="modal-foot">
             <a id="modal-link" href="#" target="_blank" rel="noopener">원문 열기 ↗</a>
+          </div>
+        </div>
+      </div>
+
+      <!-- 과제 취합문서(.hwpx) 내보내기 모달 -->
+      <div id="export-modal" class="modal" hidden>
+        <div class="modal-box" role="dialog" aria-modal="true">
+          <button id="export-modal-close" class="modal-close" type="button" aria-label="닫기">✕</button>
+          <div class="modal-head">
+            <h3>📄 과제 취합문서 내보내기</h3>
+            <div class="card-meta">교회 양식(.hwpx)에 채워 내려받습니다 · 멤버 1명 = 페이지 1장</div>
+          </div>
+          <div class="export-picker">
+            <label class="export-label" for="export-class">반</label>
+            <select id="export-class" class="login-select"></select>
+            <label class="export-label" for="export-task">과제</label>
+            <select id="export-task" class="login-select"></select>
+          </div>
+          <div id="export-preview" class="export-preview"></div>
+          <div class="modal-foot assign-modal-foot">
+            <span id="export-status" class="card-meta"></span>
+            <button id="export-run" class="btn btn-primary" type="button" disabled>내려받기</button>
           </div>
         </div>
       </div>

@@ -21,5 +21,8 @@
   "dependencies": {
     "cheerio": "^1.2.0",
     "firebase-admin": "^12.6.0"
+  },
+  "devDependencies": {
+    "jszip": "^3.10.1"
   }
 }
