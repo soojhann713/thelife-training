@@ -53,6 +53,21 @@ The web app's `js/firebase-config.js` `apiKey` is a public client value by desig
 - `assignments.js` — `COURSES` definition (see below).
 - `dashboard.js` — the bulk of the UI: dashboard, member tabs, member management, assignment status rendering.
 
+### HWPX export (`js/hwpx/`, blank forms in `assets/templates/`)
+Fills the church's own Hangul (`.hwpx`) forms from dashboard state and downloads them in the browser.
+`assets/templates/*-빈양식.hwpx` are the real church forms with all content emptied — **the forms
+themselves are never edited**; the code only clones their nodes or flips cell styles.
+- `owpml.js` / `compile.js` / `status.js` / `status-data.js` — **pure string/XML functions, no
+  DOM/Firebase/JSZip imports.** The Node tests (`scripts/test/hwpx*.test.js`) import these browser
+  files directly, so there is no web/Node code duplication to keep in sync (cf. invariant 1).
+  Never add a DOM, Firebase, or JSZip import to them.
+- `zip.js` / `build.js` — ZIP handling; JSZip is *injected* (browser: CDN `window.JSZip` lazy-loaded,
+  Node tests: devDependency). Output must keep the source form's entry names/order with `mimetype`
+  first and STORED.
+- `export-ui.js` — the modal; `scripts/tools/make-status-template.mjs` regenerates a blank form.
+- Design notes and the church forms' quirks (misaligned cell addresses, `charPrIDRef` 13/20/32
+  meaning done/not-done/N-A) are in `PLAN-HWPX.md`.
+
 ### Scheduled jobs (`scripts/`)
 - `lib/scrape.js` — board scraping + QT-date parsing. Parses the list HTML by splitting on `class="mdDefaultW100 mdWebzinecon`, extracts title/link/date with regexes, filters out "공지" (notices) and posts before `START_DATE_STRING`. `fetchPostContent` pulls body text from detail pages.
 - `lib/firebase.js` — `firebase-admin` init (service account → RTDB).
