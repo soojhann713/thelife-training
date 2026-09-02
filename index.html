@@ -150,13 +150,18 @@
         <div class="modal-box" role="dialog" aria-modal="true">
           <button id="export-modal-close" class="modal-close" type="button" aria-label="닫기">✕</button>
           <div class="modal-head">
-            <h3>📄 과제 취합문서 내보내기</h3>
-            <div class="card-meta">교회 양식(.hwpx)에 채워 내려받습니다 · 멤버 1명 = 페이지 1장</div>
+            <h3>📄 취합문서 내보내기</h3>
+            <div class="card-meta">교회 양식(.hwpx)을 그대로 써서 채워 내려받습니다</div>
           </div>
           <div class="export-picker">
+            <label class="export-label" for="export-kind">양식</label>
+            <select id="export-kind" class="login-select">
+              <option value="task">과제 취합문서 (멤버 1명 = 페이지 1장)</option>
+              <option value="status">출석·과제현황표 (주차별 체크리스트)</option>
+            </select>
             <label class="export-label" for="export-class">반</label>
             <select id="export-class" class="login-select"></select>
-            <label class="export-label" for="export-task">과제</label>
+            <label class="export-label" for="export-task" id="export-task-label">과제</label>
             <select id="export-task" class="login-select"></select>
           </div>
           <div id="export-preview" class="export-preview"></div>

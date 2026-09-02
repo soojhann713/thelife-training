@@ -24,6 +24,8 @@ import {
   matchSermonPosts,
 } from "./assignments.js";
 import { initExport, cohortOf, docTitleFor, fileNameFor } from "./hwpx/export-ui.js";
+import { safeFileName } from "./hwpx/build.js";
+import { statusValues, titleParts, isoAdd } from "./hwpx/status-data.js";
 import { toParagraphs } from "./hwpx/compile.js";
 
 function esc(s) {
@@ -1147,6 +1149,55 @@ function exportContext() {
         파일명: fileNameFor(cohort, task.kind, task.due),
       };
     },
+
+    buildStatusDoc(classId) {
+      const members = activeOf(classId);
+      if (!members.length) throw new Error("이 반에 수집 대상 멤버가 없습니다");
+      return statusDoc(classId, members.map((m) => m.name), tasksOf(classId));
+    },
+  };
+}
+
+/* ---- 출석·과제현황표(주차별 체크리스트)용 집계 ---- */
+// 맞추는 규칙은 js/hwpx/status-data.js 에 있습니다(순수 함수 — 테스트가 그 파일을 직접 씁니다).
+// 여기서는 대시보드가 들고 있는 상태(수집 글·수동 체크·큐티 기록)를 그 함수에 넘겨주기만 합니다.
+
+// 한 멤버의 [fromISO, toISO] 사이 큐티 완주일 집합 (수동 기록 포함 — memberQtData 와 같은 기준).
+function qtDaySet(name, fromISO, toISO) {
+  const set = new Set();
+  let y = +fromISO.slice(0, 4), m = +fromISO.slice(5, 7);
+  const last = (+toISO.slice(0, 4)) * 12 + (+toISO.slice(5, 7));
+  while (y * 12 + m <= last) {
+    const dim = new Date(y, m, 0).getDate();
+    for (const d of memberQtData(name, y, m, dim).uniqueDays) {
+      const key = `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+      if (key >= fromISO && key <= toISO) set.add(key);
+    }
+    m++; if (m > 12) { m = 1; y++; }
+  }
+  return set;
+}
+
+function isDone(name, taskId) {
+  return !!(autoAssign[name] || {})[taskId] || !!(assignStatus[name] || {})[taskId];
+}
+
+function statusDoc(classId, names, tasks) {
+  const today = todayISO();
+  const dues = tasks.map((t) => t.due).filter(Boolean).sort();
+  const from = isoAdd(dues[0] || today, -7);
+  const to = dues[dues.length - 1] || today;
+  const qtCache = new Map();
+  const qtDays = (name) => {
+    if (!qtCache.has(name)) qtCache.set(name, qtDaySet(name, from, to));
+    return qtCache.get(name);
+  };
+
+  const { values, start, year } = statusValues({ names, tasks, today, isDone, qtDays });
+  const title = titleParts(classLabelOf(classId), year, start);
+  return {
+    year, title, members: names, values,
+    파일명: `${safeFileName(`${title.cohort}기_출석과제현황_${today.replace(/-/g, "")}`)}.hwpx`,
   };
 }
 
