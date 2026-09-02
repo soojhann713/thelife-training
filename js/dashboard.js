@@ -108,6 +108,9 @@ function tasksFromObj(obj) {
       due: (t && t.due) || "",
       m: (t && Array.isArray(t.m)) ? t.m : [],
       x: (t && Array.isArray(t.x)) ? t.x : [],
+      // 설교간증 매칭용. 없으면 assignments.js 가 id 에서 되살립니다.
+      service: (t && t.service) || "",
+      serviceDate: (t && t.serviceDate) || "",
     }))
     .sort((a, b) => (a.order - b.order) || a.id.localeCompare(b.id));
 }

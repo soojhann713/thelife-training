@@ -52,7 +52,7 @@ on:
         required: false
         default: true
       prune:
-        description: "seed-course 시 시드에 없는 과제 삭제(PRUNE). force 와 함께만 의미 있음"
+        description: "seed-course 시 시드에 없는 과제 삭제(PRUNE). dry 로 목록 확인 후 켜세요"
         type: boolean
         required: false
         default: false
