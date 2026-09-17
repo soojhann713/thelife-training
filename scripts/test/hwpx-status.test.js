@@ -353,13 +353,31 @@ test("statusValues: 설교간증을 금·주로 나눠 맞춘다", () => {
   assert.equal(values["2026-04-26"].갑.fri, false);
 });
 
-test("statusValues: 큐티는 강의일까지 7일 안의 서로 다른 날 수", () => {
+test("statusValues: 큐티는 강의일부터 다음 강의일 전날까지 센다", () => {
   const tasks = [{ id: "l", kind: "생활간증", due: "2026-05-03", group: "1학기" }];
-  const days = new Set(["2026-04-27", "2026-04-28", "2026-05-03", "2026-04-20"]); // 4/20 은 창 밖
+  //              4/26 줄 ←┐      ┌→ 4/26 줄        5/3 줄 ←┐        창 밖 ┐
+  const days = new Set(["2026-04-26", "2026-04-28", "2026-05-03", "2026-04-20"]);
   const { values } = statusValues({
-    names: ["갑"], tasks, today: "2026-05-31", isDone: NEVER, qtDays: () => days,
+    names: ["갑"], tasks, today: "2026-05-31", weekKeys: MAY,
+    isDone: NEVER, qtDays: () => days,
   });
-  assert.equal(values["2026-05-03"].갑.qt, 3);
+  assert.equal(values["2026-04-26"].갑.qt, 2);   // 4/26 · 4/28
+  assert.equal(values["2026-05-03"].갑.qt, 1);   // 5/3 — 다음 강의일(5/3)은 그 줄 몫
+  assert.equal(values["2026-05-10"].갑.qt, 0);
+});
+
+test("statusValues: 방학처럼 사이가 벌어진 줄도 큐티는 한 주치만 센다", () => {
+  const keys = ["2026-06-07", "2026-06-14", "2026-09-06"]; // 6/14 → 9/6 은 84일
+  const tasks = [{ id: "l", kind: "생활간증", due: "2026-06-14", group: "1학기" }];
+  const days = new Set([
+    "2026-06-14", "2026-06-17", "2026-06-20", // 6/14 줄의 한 주 안
+    "2026-07-15", "2026-08-20",               // 방학 한복판 — 세지 않습니다
+  ]);
+  const { values } = statusValues({
+    names: ["갑"], tasks, today: "2026-12-31", weekKeys: keys,
+    isDone: NEVER, qtDays: () => days,
+  });
+  assert.equal(values["2026-06-14"].갑.qt, 3);
 });
 
 test("statusValues: 개강·방학 그룹은 이름 없는 줄로 따로 모은다", () => {
@@ -509,4 +527,15 @@ test("실제 커리큘럼: 주차 번호와 양식 줄이 1:1 로 맞물린다",
   // 놓일 줄이 없는 것은 방학 중 예배뿐입니다(그 주엔 강의가 없으니 체크할 칸도 없습니다).
   assert.ok(plan.unplaced.every((t) => t.kind === "설교간증"),
     `설교간증 외에 빠진 과제: ${plan.unplaced.filter((t) => t.kind !== "설교간증").map((t) => t.title).join(", ")}`);
+});
+
+test("lectureSpan: 방학 간격 하나에 '한 주' 가 끌려가지 않는다", () => {
+  // 주간 강의 사이에 방학이 한 번 끼어도 한 줄이 품는 기간은 7일이어야 합니다.
+  const keys = ["2026-06-07", "2026-06-14", "2026-09-06", "2026-09-13"];
+  const days = new Set(["2026-06-14", "2026-07-15"]); // 7/15 는 방학 한복판
+  const { values } = statusValues({
+    names: ["갑"], tasks: [{ id: "l", kind: "생활간증", due: "2026-06-14" }],
+    today: "2026-12-31", weekKeys: keys, isDone: NEVER, qtDays: () => days,
+  });
+  assert.equal(values["2026-06-14"].갑.qt, 1);
 });

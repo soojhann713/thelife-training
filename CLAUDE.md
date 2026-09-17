@@ -73,9 +73,11 @@ reviewable and repeatable (`fix-status-form.mjs` unmerged the 6/7·6/14 attendan
   collected on 3/15 but ticked on the **3/8** row — that is what makes the form's week number line
   up 1:1 with the curriculum week (22주 = 10/18, 26주 = 11/15). Don't "fix" it back to due-date
   matching; a test asserts row *N* holds week *N*. The lecture days come from the form itself, so
-  `buildStatusDoc` is **async**. The span is capped at the median lecture gap so a vacation
-  (6/14 → 9/6) doesn't dump a whole summer into one row; what doesn't fit is reported as
-  `unplaced` rather than silently merged.
+  `buildStatusDoc` is **async**. The span is capped at the *modal* lecture gap (mode, not mean or
+  median — one vacation gap must not stretch what "a week" means) so 6/14 → 9/6 doesn't dump a
+  whole summer into one row; what doesn't fit is reported as `unplaced` rather than silently
+  merged. The QT-day count on a row runs **forward** over that same span (lecture day → day before
+  the next lecture), so every column on a row describes the same week.
 - Tools: `make-status-template.mjs` (regenerate a blank form from a church original),
   `fix-status-form.mjs` (repair misaligned merges — idempotent),
   `status-week-list.mjs` (print which task lands on which row; uses the *same* `statusWeekPlan`

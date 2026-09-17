@@ -11,7 +11,7 @@
 //   생    = 그 줄에 묶인 생활간증·기타 과제 (있는 것 전부 완료해야 완료)
 //   독    = 그 줄에 묶인 독서 과제
 //   금/주 = 그 줄에 묶인 금요·주일 설교간증 (그 주의 주일·금요 예배)
-//   큐티  = 강의일까지 7일간(강의일 -6 ~ 강의일) 서로 다른 큐티 완주일 수
+//   큐티  = 그 강의일부터 다음 강의일 전날까지 서로 다른 큐티 완주일 수 (같은 줄 = 같은 한 주)
 //   출    = 자동으로 알 수 없어 아예 값을 만들지 않습니다(관리자가 한글에서 직접 체크)
 //
 // '개강과제'·'방학과제' 줄은 날짜가 없어 커리큘럼의 그룹 이름(개강/방학)으로 맞춥니다.
@@ -38,15 +38,20 @@ const daysBetween = (a, b) =>
   Math.round((new Date(`${b}T00:00:00Z`) - new Date(`${a}T00:00:00Z`)) / DAY_MS);
 
 /**
- * 한 줄이 품는 기간(일). 강의일 간격의 중앙값을 씁니다 — 주간 과정이면 7.
- * 방학처럼 드물게 벌어지는 간격에 휘둘리지 않으려고 평균이 아니라 중앙값입니다.
+ * 한 줄이 품는 기간(일). 강의일 간격의 **최빈값**을 씁니다 — 주간 과정이면 7, 격주면 14.
+ *
+ * 평균·중앙값이 아니라 최빈값인 이유: 방학처럼 한 번 크게 벌어지는 간격이 있으면
+ * 평균은 물론 중앙값도(강의일이 적을 때) 그쪽으로 끌려갑니다. 가장 자주 나오는 간격이
+ * 그 과정의 '한 주' 입니다. 같은 횟수면 짧은 쪽 — 넓게 잡아 남의 주차를 먹는 것보다 낫습니다.
  */
 function lectureSpan(lectures) {
-  const gaps = [];
-  for (let i = 1; i < lectures.length; i++) gaps.push(daysBetween(lectures[i - 1], lectures[i]));
-  if (!gaps.length) return 7;
-  gaps.sort((a, b) => a - b);
-  return gaps[Math.floor(gaps.length / 2)] || 7;
+  const tally = new Map();
+  for (let i = 1; i < lectures.length; i++) {
+    const gap = daysBetween(lectures[i - 1], lectures[i]);
+    if (gap > 0) tally.set(gap, (tally.get(gap) || 0) + 1);
+  }
+  if (!tally.size) return 7;
+  return [...tally.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0][0];
 }
 
 /**
@@ -123,7 +128,7 @@ export function statusWeekPlan({ tasks, weekKeys, today }) {
   if (preTasks.length) groups.push({ key: "개강과제", ...split(preTasks) });
   if (vacTasks.length) groups.push({ key: "방학과제", ...split(vacTasks) });
 
-  return { lectures, rows, groups, unplaced, start, end, year: +String(start).slice(0, 4) };
+  return { lectures, rows, groups, unplaced, span, start, end, year: +String(start).slice(0, 4) };
 }
 
 /**
@@ -139,12 +144,18 @@ export function statusWeekPlan({ tasks, weekKeys, today }) {
 export function statusValues({ names, tasks, today, isDone, qtDays, weekKeys }) {
   const plan = statusWeekPlan({ tasks, weekKeys, today });
 
+  // 큐티는 **그 강의일부터 다음 강의일 전날까지** 셉니다 — 같은 줄의 생·독·금·주와 같은 한 주.
+  // (다음 강의일 당일은 그 줄 몫이라 빼고, 방학처럼 사이가 벌어진 구간은 한 주치로 자릅니다.)
   const qt = new Map(names.map((n) => [n, qtDays(n)]));
-  const qtCount = (name, toISO) => {
+  const qtCount = (name, fromISO, nextISO) => {
     const set = qt.get(name);
     if (!set) return 0;
     let n = 0;
-    for (let i = 0; i < 7; i++) if (set.has(isoAdd(toISO, -i))) n++;
+    for (let i = 0; i < plan.span; i++) {
+      const day = isoAdd(fromISO, i);
+      if (nextISO && day >= nextISO) break;
+      if (set.has(day)) n++;
+    }
     return n;
   };
 
@@ -160,8 +171,9 @@ export function statusValues({ names, tasks, today, isDone, qtDays, weekKeys }) 
     }
   }
 
-  for (const row of plan.rows) {
-    if (row.future) continue; // 아직 오지 않은 주차 — 양식 그대로 둡니다
+  plan.rows.forEach((row, i) => {
+    if (row.future) return; // 아직 오지 않은 주차 — 양식 그대로 둡니다
+    const next = plan.lectures[i + 1];
     values[row.key] = {};
     for (const name of names) {
       values[row.key][name] = {
@@ -169,10 +181,10 @@ export function statusValues({ names, tasks, today, isDone, qtDays, weekKeys }) 
         read: allDone(name, row.read, isDone),
         fri: allDone(name, row.fri, isDone),
         sun: allDone(name, row.sun, isDone),
-        qt: qtCount(name, row.key),
+        qt: qtCount(name, row.key, next),
       };
     }
-  }
+  });
 
   return { values, start: plan.start, end: plan.end, year: plan.year };
 }

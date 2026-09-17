@@ -1188,8 +1188,9 @@ function isDone(name, taskId) {
 async function statusDoc(classId, names, tasks) {
   const today = todayISO();
   const dues = tasks.map((t) => t.due).filter(Boolean).sort();
+  // 큐티 창이 강의일부터 **앞으로** 한 주라, 마지막 강의일 뒤까지 넉넉히 읽어 둡니다.
   const from = isoAdd(dues[0] || today, -7);
-  const to = dues[dues.length - 1] || today;
+  const to = isoAdd(dues[dues.length - 1] || today, 7);
   const qtCache = new Map();
   const qtDays = (name) => {
     if (!qtCache.has(name)) qtCache.set(name, qtDaySet(name, from, to));
