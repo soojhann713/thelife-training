@@ -45,6 +45,19 @@ const kindRank = (k) => {
 /** 제출일을 "3/15" 처럼 짧게. 목록이 날짜 오름차순이라 날짜를 앞에 둡니다. */
 const shortDue = (due) => (due ? `${+due.slice(5, 7)}/${+due.slice(8, 10)}` : "미정");
 
+/**
+ * 과제 목록에 보일 한 줄.
+ *
+ * 설교간증은 **제출일을 붙이지 않습니다.** 제목에 이미 예배 날짜가 들어 있어서
+ * ("11월 20일 금요예배 말씀") 제출일까지 앞에 붙이면 한 줄에 날짜가 둘이 되어
+ * 어느 쪽이 예배일인지 헷갈립니다. 목록 순서는 어차피 제출일 오름차순이고,
+ * 설교간증은 제목의 날짜도 같은 순서라 날짜 없이도 찾기 쉽습니다.
+ */
+export function taskOptionLabel(task) {
+  const t = task || {};
+  return kindOf(t) === SERMON_KIND ? String(t.title ?? "") : `${shortDue(t.due)} · ${t.title ?? ""}`;
+}
+
 let ctx = null;
 let modal = null;
 let taskPool = [];   // 지금 고른 반의 과제 전부(날짜 오름차순)
@@ -116,7 +129,7 @@ function fillTasks() {
   const list = taskPool.filter((t) => kindOf(t) === cat);
   el("export-task").innerHTML = list.length
     ? list.map((t) =>
-      `<option value="${esc(t.id)}">${esc(shortDue(t.due))} · ${esc(t.title)}</option>`).join("")
+      `<option value="${esc(t.id)}">${esc(taskOptionLabel(t))}</option>`).join("")
     : `<option value="">과제가 없습니다</option>`;
   preview();
 }
