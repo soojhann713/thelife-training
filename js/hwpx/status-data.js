@@ -2,14 +2,15 @@
 //
 // 양식은 '주차(강의일)' 로 줄이 나뉘어 있고, 우리 과제는 '마감일(due)' 을 갖고 있습니다.
 //
-// **한 줄 = 그 강의일까지 내야 하는 과제 전부.**
-// 마감일이 강의일과 딱 떨어지지 않아도(예: 수요일 마감) 그 다음 강의일 줄에 들어갑니다.
-//   강의일 D 줄 ← 직전 강의일 다음날 ~ D 사이에 마감인 과제
+// **한 줄 = 그 강의일에 내준 과제.** (= 마감일 직전 강의일 줄에 붙습니다)
+// 이 커리큘럼은 '마감 = 다음 강의일' 이라, 1주차(3/8 강의) 과제는 3/15 에 걷지만
+// **3/8 줄**에 체크합니다. 그래야 양식의 주차 번호와 커리큘럼 주차가 맞습니다.
+//   예) 2학기 #16 = 9/6 = 16주, #22 = 10/18 = 22주, #26 = 11/15 = 26주
 // 강의일 목록은 양식에서 읽어(weekKeys) 그대로 씁니다. 못 읽으면 마감일+주일로 추정합니다.
 //
 //   생    = 그 줄에 묶인 생활간증·기타 과제 (있는 것 전부 완료해야 완료)
 //   독    = 그 줄에 묶인 독서 과제
-//   금/주 = 그 줄에 묶인 금요·주일 설교간증
+//   금/주 = 그 줄에 묶인 금요·주일 설교간증 (그 주의 주일·금요 예배)
 //   큐티  = 강의일까지 7일간(강의일 -6 ~ 강의일) 서로 다른 큐티 완주일 수
 //   출    = 자동으로 알 수 없어 아예 값을 만들지 않습니다(관리자가 한글에서 직접 체크)
 //
@@ -83,21 +84,31 @@ export function statusWeekPlan({ tasks, weekKeys, today }) {
   const vacTasks = inGroup(/방학/);
   const special = new Set([...preTasks, ...vacTasks].map((t) => t.id));
 
-  // 마감일 이상인 첫 강의일 = 그 과제를 내야 하는 강의일.
+  // 마감일 **직전** 강의일 = 그 과제를 내준 강의일.
   //
-  // 다만 **한 주치보다 멀리 거슬러 올라가지는 않습니다.** 방학처럼 강의일이 통째로 비는 구간이
-  // 있으면(6/14 → 9/6) 그 사이 과제가 전부 다음 강의일 줄로 쏟아져 들어가기 때문입니다.
+  // 다만 **한 주치보다 멀리 떨어진 것은 붙이지 않습니다.** 방학처럼 강의일이 통째로 비는
+  // 구간(6/14 → 9/6)의 과제·예배가 전부 6/14 줄로 쏟아져 들어가기 때문입니다.
   // 그런 과제는 양식에 놓일 줄이 없는 것이므로 조용히 합치지 않고 unplaced 로 알립니다.
   const lectures = lectureDays(weekKeys, dues, start, end);
   const span = lectureSpan(lectures);
+  const last = lectures[lectures.length - 1];
+
+  const assignedAt = (due) => {
+    let prev = null;
+    for (const L of lectures) { if (L < due) prev = L; else break; }
+    if (prev) return { L: prev, gap: daysBetween(prev, due) };
+    // 첫 강의일 전에 마감인 과제(서약서 같은 개강 행정 과제)는 첫 강의일 줄로 보냅니다.
+    if (lectures.length) return { L: lectures[0], gap: daysBetween(due, lectures[0]) };
+    return null;
+  };
+
   const bucket = new Map(lectures.map((L) => [L, []]));
   const unplaced = [];
   for (const t of all) {
     if (!t.due || special.has(t.id)) continue;
-    const L = lectures.find((x) => t.due <= x);
-    if (!L) { unplaced.push({ ...t, why: "late" }); continue; }   // 마지막 강의일보다 늦게 마감
-    if (daysBetween(t.due, L) > span) { unplaced.push({ ...t, why: "gap" }); continue; } // 그 주차 줄이 없음
-    bucket.get(L).push(t);
+    const at = assignedAt(t.due);
+    if (at && at.gap <= span) { bucket.get(at.L).push(t); continue; }
+    unplaced.push({ ...t, why: last && t.due > last ? "late" : "gap" });
   }
 
   const split = (list) => ({

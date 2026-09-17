@@ -51,13 +51,15 @@ test("readStatusForm: 커밋된 빈 양식의 멤버 열·주차 수", async () 
   const form = readStatusForm(await section(), YEAR);
   assert.equal(form.slots, 13);
   assert.equal(form.tables.length, 2);
-  assert.equal(form.keys.length, 27);
+  assert.equal(form.keys.length, 28);
   assert.ok(form.keys.includes("개강과제"));
   assert.ok(form.keys.includes("방학과제"));
   // 날짜 칸 '3/8' 은 3월 8일, 그 다음 '15' 는 같은 3월 15일로 이어집니다.
   assert.ok(form.keys.includes("2026-03-08"));
   assert.ok(form.keys.includes("2026-03-15"));
   assert.ok(form.keys.includes("2026-11-15"));
+  // 원본에 빠져 있던 10/18 주차 (fix-status-form.mjs 가 넣었습니다).
+  assert.ok(form.keys.includes("2026-10-18"));
 });
 
 test("readStatusForm: 주차 번호를 날짜로 잘못 읽지 않는다", async () => {
@@ -314,26 +316,29 @@ test("isoAdd: 달·해를 넘어가는 날짜 계산", () => {
   assert.equal(isoAdd("2026-05-03", -6), "2026-04-27");
 });
 
-test("statusValues: 마감일로 생·독을 맞춘다", () => {
+const MAY = ["2026-04-26", "2026-05-03", "2026-05-10", "2026-05-17"];
+
+test("statusValues: 과제를 '내준 강의일' 줄에 맞춘다", () => {
+  // 마감 = 다음 강의일 이므로, 5/10 마감 과제는 5/3 강의에서 내준 것입니다.
   const tasks = [
-    { id: "life1", kind: "생활간증", due: "2026-05-03", group: "1학기" },
-    { id: "read1", kind: "독서", due: "2026-05-03", group: "1학기" },
-    { id: "life2", kind: "생활간증", due: "2026-05-10", group: "1학기" },
+    { id: "life1", kind: "생활간증", due: "2026-05-10", group: "1학기" },
+    { id: "read1", kind: "독서", due: "2026-05-10", group: "1학기" },
+    { id: "life2", kind: "생활간증", due: "2026-05-17", group: "1학기" },
   ];
   const done = new Set(["life1"]);
   const { values } = statusValues({
-    names: ["갑"], tasks, today: "2026-05-31",
+    names: ["갑"], tasks, today: "2026-05-31", weekKeys: MAY,
     isDone: (_n, id) => done.has(id), qtDays: NO_QT,
   });
   assert.equal(values["2026-05-03"].갑.life, true);
   assert.equal(values["2026-05-03"].갑.read, false);
   assert.equal(values["2026-05-10"].갑.life, false);
-  // 해당 마감일에 독서 과제가 없는 주차는 undefined — 양식 칸을 건드리지 않습니다.
+  // 그 줄에 독서 과제가 없으면 undefined — 양식 칸을 건드리지 않습니다.
   assert.equal(values["2026-05-10"].갑.read, undefined);
 });
 
 test("statusValues: 설교간증을 금·주로 나눠 맞춘다", () => {
-  // 5/1(금)·4/26(주일) 예배 → 둘 다 제출일 5/3
+  // 5/1(금)·4/26(주일) 예배 → 둘 다 제출일 5/3 → 그 주 강의일인 4/26 줄에 붙습니다.
   const tasks = sermonItems("t", "2026-04-24", "2026-05-10").map((t) => ({ ...t, group: "예배은혜나눔" }));
   const fri = tasks.find((t) => t.due === "2026-05-03" && t.service === "금요");
   const sun = tasks.find((t) => t.due === "2026-05-03" && t.service === "주일");
@@ -341,11 +346,11 @@ test("statusValues: 설교간증을 금·주로 나눠 맞춘다", () => {
   assert.equal(sun.serviceDate, "2026-04-26");
 
   const { values } = statusValues({
-    names: ["갑"], tasks, today: "2026-05-31",
+    names: ["갑"], tasks, today: "2026-05-31", weekKeys: MAY,
     isDone: (_n, id) => id === sun.id, qtDays: NO_QT,
   });
-  assert.equal(values["2026-05-03"].갑.sun, true);
-  assert.equal(values["2026-05-03"].갑.fri, false);
+  assert.equal(values["2026-04-26"].갑.sun, true);
+  assert.equal(values["2026-04-26"].갑.fri, false);
 });
 
 test("statusValues: 큐티는 강의일까지 7일 안의 서로 다른 날 수", () => {
@@ -395,39 +400,50 @@ test("statusValues: 아직 오지 않은 주차는 값을 만들지 않는다", 
 
 const WEEKLY = ["2026-05-03", "2026-05-10", "2026-05-17", "2026-05-24"];
 
-test("statusWeekPlan: 강의일까지 마감인 과제를 그 강의일 줄에 모은다", () => {
+test("statusWeekPlan: 과제를 '내준 강의일'(마감일 직전 강의일) 줄에 모은다", () => {
   const tasks = [
-    { id: "a", kind: "생활간증", due: "2026-05-06" },  // 수요일 마감 → 5/10 강의일 줄
-    { id: "b", kind: "독서", due: "2026-05-10" },      // 강의일 당일 마감 → 같은 줄
+    { id: "a", kind: "생활간증", due: "2026-05-06" },  // 수요일 마감 → 직전 강의일 5/3 줄
+    { id: "b", kind: "독서", due: "2026-05-10" },      // 강의일 당일 마감 → 직전 강의일 5/3 줄
     { id: "c", kind: "생활간증", due: "2026-05-17" },
   ];
   const plan = statusWeekPlan({ tasks, weekKeys: WEEKLY });
   const row = (k) => plan.rows.find((r) => r.key === k);
-  assert.deepEqual(row("2026-05-10").life.map((t) => t.id), ["a"]);
-  assert.deepEqual(row("2026-05-10").read.map((t) => t.id), ["b"]);
-  assert.deepEqual(row("2026-05-17").life.map((t) => t.id), ["c"]);
-  assert.deepEqual(row("2026-05-03").life, []);
+  assert.deepEqual(row("2026-05-03").life.map((t) => t.id), ["a"]);
+  assert.deepEqual(row("2026-05-03").read.map((t) => t.id), ["b"]);
+  assert.deepEqual(row("2026-05-10").life.map((t) => t.id), ["c"]);
+  assert.deepEqual(row("2026-05-17").life, []);
   assert.deepEqual(plan.unplaced, []);
 });
 
-test("statusWeekPlan: 주차 간격보다 멀리 거슬러 올라가지 않는다(방학)", () => {
-  // 5/24 다음 강의일이 9/6 이면, 그 사이 과제를 9/6 줄에 몰아넣지 않습니다.
+test("statusWeekPlan: 첫 강의일 전에 마감인 과제는 첫 강의일 줄로", () => {
+  // 서약서처럼 개강일까지 내는 행정 과제 — 앞에 강의일이 없어도 사라지지 않아야 합니다.
+  const plan = statusWeekPlan({ tasks: [{ id: "pledge", kind: "기타", due: "2026-05-03" }], weekKeys: WEEKLY });
+  assert.deepEqual(plan.rows[0].life.map((t) => t.id), ["pledge"]);
+  assert.deepEqual(plan.unplaced, []);
+});
+
+test("statusWeekPlan: 주차 간격보다 멀리 떨어진 것은 붙이지 않는다(방학)", () => {
+  // 5/24 다음 강의일이 9/6 이면, 방학 중 마감인 과제를 5/24 줄에 몰아넣지 않습니다.
   const keys = [...WEEKLY, "2026-09-06", "2026-09-13"];
   const tasks = [
     { id: "vacation", kind: "생활간증", due: "2026-06-21" },
-    { id: "just-before", kind: "생활간증", due: "2026-08-31" }, // 9/6 에서 6일 전 → 들어갑니다
+    { id: "just-after", kind: "생활간증", due: "2026-05-30" }, // 5/24 에서 6일 뒤 → 들어갑니다
   ];
   const plan = statusWeekPlan({ tasks, weekKeys: keys });
-  const sept = plan.rows.find((r) => r.key === "2026-09-06");
-  assert.deepEqual(sept.life.map((t) => t.id), ["just-before"]);
+  const may24 = plan.rows.find((r) => r.key === "2026-05-24");
+  assert.deepEqual(may24.life.map((t) => t.id), ["just-after"]);
   assert.deepEqual(plan.unplaced.map((t) => [t.id, t.why]), [["vacation", "gap"]]);
 });
 
-test("statusWeekPlan: 마지막 강의일보다 늦게 마감인 과제는 놓일 줄이 없다", () => {
-  const tasks = [{ id: "final", kind: "생활간증", due: "2026-05-31" }];
+test("statusWeekPlan: 마지막 강의일에서 한참 뒤에 마감인 과제는 놓일 줄이 없다", () => {
+  const tasks = [
+    { id: "closing", kind: "생활간증", due: "2026-05-31" },  // 5/24 +7 → 5/24 줄에 들어갑니다
+    { id: "far", kind: "생활간증", due: "2026-06-30" },      // 5/24 +37 → 놓일 줄 없음
+  ];
   const plan = statusWeekPlan({ tasks, weekKeys: WEEKLY });
-  assert.deepEqual(plan.unplaced.map((t) => [t.id, t.why]), [["final", "late"]]);
-  assert.ok(plan.rows.every((r) => !r.life.length));
+  const last = plan.rows[plan.rows.length - 1];
+  assert.deepEqual(last.life.map((t) => t.id), ["closing"]);
+  assert.deepEqual(plan.unplaced.map((t) => [t.id, t.why]), [["far", "late"]]);
 });
 
 test("statusValues: weekKeys 를 주면 그 강의일 줄로만 값을 만든다", () => {
@@ -437,7 +453,7 @@ test("statusValues: weekKeys 를 주면 그 강의일 줄로만 값을 만든다
     isDone: () => true, qtDays: NO_QT,
   });
   assert.deepEqual(Object.keys(values).sort(), WEEKLY);
-  assert.equal(values["2026-05-10"].갑.life, true);
+  assert.equal(values["2026-05-03"].갑.life, true);
   assert.equal(values["2026-05-06"], undefined); // 마감일 자체는 줄이 되지 않습니다
 });
 
@@ -470,22 +486,27 @@ test("실제 커리큘럼(제자반 11기)이 양식의 주차와 맞물린다",
   assert.ok(withSermon.length >= dated.length - 2, `금·주가 붙은 주차 ${withSermon.length}/${dated.length}`);
 });
 
-test("실제 커리큘럼: 양식에 줄이 없는 주차는 조용히 합치지 않고 알린다", async () => {
+test("실제 커리큘럼: 주차 번호와 양식 줄이 1:1 로 맞물린다", async () => {
   const course = COURSES.find((c) => c.id === "disciple11");
   const form = readStatusForm(await section(), YEAR);
   const plan = statusWeekPlan({ tasks: courseAssignments(course), weekKeys: form.keys });
 
-  // 양식에 1학기 종강(6/21)·2학기 종강(11/22) 줄이 없어 그 주 과제는 놓일 자리가 없습니다.
-  // 방학(6/14→9/6) 사이 설교간증도 마찬가지 — 9/6 줄로 쏟아져 들어가면 안 됩니다.
-  const byWhy = (w) => plan.unplaced.filter((t) => t.why === w);
-  assert.ok(byWhy("gap").some((t) => t.due === "2026-06-21"), "6/21 과제가 gap 으로 빠져야 합니다");
-  assert.ok(byWhy("late").some((t) => t.due === "2026-11-22"), "11/22 과제가 late 로 빠져야 합니다");
+  // N번째 날짜 줄 = N주차. 어긋나면 양식이나 커리큘럼이 바뀐 것입니다.
+  plan.rows.forEach((r, i) => {
+    const weeks = r.life.filter((t) => t.week).map((t) => t.week);
+    assert.deepEqual(weeks, [i + 1], `${r.key} 줄에 ${weeks.join(",") || "없음"} (기대: ${i + 1}주)`);
+  });
+  assert.equal(plan.rows.length, 26);
+  assert.equal(plan.rows[21].key, "2026-10-18"); // 22주 = 10/18
+  assert.equal(plan.rows[25].key, "2026-11-15"); // 26주 = 11/15 (마지막 강의주차)
 
-  const sept = plan.rows.find((r) => r.key === "2026-09-06");
-  assert.ok(sept.fri.length <= 2 && sept.sun.length <= 2,
-    `9/6 줄에 예배가 ${sept.fri.length}/${sept.sun.length} 개 — 방학치가 쏟아져 들어왔습니다`);
+  // 한 주에 금 1 · 주 1 — 방학치가 어느 줄로도 쏟아져 들어오면 안 됩니다.
+  for (const r of plan.rows) {
+    assert.ok(r.fri.length <= 1 && r.sun.length <= 1,
+      `${r.key} 줄에 예배가 금 ${r.fri.length} · 주 ${r.sun.length} 개`);
+  }
 
-  // 10/18 강의일 줄이 양식에 없어서 21·22주가 10/25 한 줄에 묶입니다(알고 쓰는 것).
-  const oct = plan.rows.find((r) => r.key === "2026-10-25");
-  assert.equal(oct.life.length, 2);
+  // 놓일 줄이 없는 것은 방학 중 예배뿐입니다(그 주엔 강의가 없으니 체크할 칸도 없습니다).
+  assert.ok(plan.unplaced.every((t) => t.kind === "설교간증"),
+    `설교간증 외에 빠진 과제: ${plan.unplaced.filter((t) => t.kind !== "설교간증").map((t) => t.title).join(", ")}`);
 });

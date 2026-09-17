@@ -18,7 +18,7 @@
 // (다른 주차의 32 표시는 이 도구가 건드리지 않습니다 — 애초에 그 행들은 고칠 대상이 아닙니다.)
 import JSZip from "jszip";
 import { readFile, writeFile } from "node:fs/promises";
-import { findElements, tableCells, applyEdits } from "../../js/hwpx/owpml.js";
+import { findElements, tableCells, setCellText, applyEdits } from "../../js/hwpx/owpml.js";
 import { readStatusForm } from "../../js/hwpx/status.js";
 
 const SECTION = "Contents/section0.xml";
@@ -58,6 +58,80 @@ const innerOf = (xml, el) => {
   return { start: open, end: close, text: xml.slice(open, close) };
 };
 
+const DATE_RE = /^\d{1,2}([/.\-]\d{1,2})?$/;
+const attrNum = (s, tag, name) => {
+  const m = s.match(new RegExp(`<hp:${tag}[^>]*${name}="(\\d+)"`));
+  return m ? +m[1] : null;
+};
+
+/** 한 표의 주차 블록(과제 행 + 뒤따르는 출석 행)과 날짜 칸을 뽑습니다. */
+function weekBlocks(xml, rows) {
+  const out = [];
+  let pending = null;
+  for (const row of rows) {
+    if (isTaskRow(row.cells)) {
+      const head = row.cells.find((c) => norm(c.text) === TASK_LABEL);
+      const before = row.cells.filter((c) => c.start < head.start);
+      pending = { task: row, date: before[before.length - 1] || null, attend: null, attendDate: null };
+      out.push(pending);
+    } else if (isAttendRow(row.cells) && pending && !pending.attend) {
+      const head = row.cells.find((c) => ATTEND_LABELS.has(norm(c.text)));
+      const before = row.cells.filter((c) => c.start < head.start);
+      pending.attend = row;
+      pending.attendDate = before[before.length - 1] || null;
+    }
+  }
+  return out;
+}
+
+/**
+ * 날짜가 과제 행과 출석 행에 나뉘어 적힌 주차를 고칩니다.
+ *
+ * 무엇이 잘못돼 있었나: 2학기 21주차는 과제 행에 `11`(10/11), 출석 행에 `18`(10/18) 이
+ * 따로 적혀 있습니다. 한 주차 블록에 두 강의일이 들어간 것이라, 10/18 주차 줄이 통째로
+ * 없는 것과 같습니다(그 주 과제가 다음 줄로 밀려 두 주치가 한 줄에 묶임).
+ *
+ * 어떻게 고치나: 날짜 칸을 정상 주차처럼 두 행에 걸치게 합치고, 빠져 있던 날짜(`18`)를
+ * 다음 주차로 넣은 뒤 **그 뒤 주차의 날짜를 한 칸씩 뒤로 밉니다.** 맨 뒤의 '날짜가 비어
+ * 있는 주차' 가 그 자리를 받습니다(그래서 잃는 날짜가 없습니다).
+ */
+function repairSplitDate(xml, blocks, edits, fixed) {
+  const i = blocks.findIndex((b) =>
+    b.date && b.attendDate
+    && attrNum(xml.slice(b.date.start, b.date.end), "cellSpan", "rowSpan") === 1
+    && DATE_RE.test(norm(b.attendDate.text)));
+  if (i < 0) return;
+
+  const dated = blocks.slice(i + 1).filter((b) => b.date);
+  const last = dated[dated.length - 1];
+  if (!last || norm(last.date.text) !== "") {
+    fixed.push(`⚠️ ${norm(blocks[i].attendDate.text)} 주차를 넣을 빈 주차 줄이 없어 날짜를 밀지 못했습니다`);
+    return;
+  }
+
+  // 1) 날짜 칸을 두 행에 걸치게 합치고, 출석 행의 날짜 칸은 없앱니다.
+  const dateXml = xml.slice(blocks[i].date.start, blocks[i].date.end);
+  const attendXml = xml.slice(blocks[i].attendDate.start, blocks[i].attendDate.end);
+  const merged = dateXml
+    .replace(/(<hp:cellSpan[^>]*rowSpan=")\d+(")/, "$12$2")
+    .replace(/(<hp:cellSz[^>]*height=")\d+(")/,
+      `$1${(attrNum(dateXml, "cellSz", "height") || 0) + (attrNum(attendXml, "cellSz", "height") || 0)}$2`);
+  edits.push({ start: blocks[i].date.start, end: blocks[i].date.end, xml: merged });
+  edits.push({ start: blocks[i].attendDate.start, end: blocks[i].attendDate.end, xml: "" });
+
+  // 2) 빠져 있던 날짜를 다음 주차에 넣고, 그 뒤를 한 칸씩 뒤로 밉니다.
+  const moved = [norm(blocks[i].attendDate.text), ...dated.slice(0, -1).map((b) => norm(b.date.text))];
+  dated.forEach((b, j) => {
+    edits.push({
+      start: b.date.start, end: b.date.end,
+      xml: setCellText(xml.slice(b.date.start, b.date.end), moved[j]),
+    });
+  });
+
+  fixed.push(`${norm(blocks[i].date.text)} 주차에 겹쳐 있던 ${moved[0]} 주차를 분리`
+    + ` (그 뒤 ${dated.length}개 주차 날짜를 한 칸씩 이동: ${moved.join(" → ")})`);
+}
+
 export function repairSection(xml) {
   const edits = [];
   const fixed = [];
@@ -86,6 +160,7 @@ export function repairSection(xml) {
     }
     if (!lineHeight) continue;
 
+    const rebuilt = new Set(); // 통째로 갈아끼운 출석 행 — 다른 수리가 그 안을 또 건드리면 안 됩니다
     rows.forEach((row, i) => {
       if (!isTaskRow(row.cells)) return;
       const merged = row.cells.filter((c) => norm(c.text) === TASK_LABEL && c.rowSpan === 2);
@@ -93,6 +168,7 @@ export function repairSection(xml) {
       const next = rows[i + 1];
       if (!next || !isAttendRow(next.cells)) return;
       if (next.cells.length === normalCount) return; // 이미 정상
+      rebuilt.add(next.start);
 
       for (const c of merged) {
         edits.push({ start: c.start, end: c.end, xml: unmergeCell(xml.slice(c.start, c.end), lineHeight) });
@@ -107,6 +183,9 @@ export function repairSection(xml) {
       const date = before.length ? norm(before[before.length - 1].text) : "";
       fixed.push(`${date || `행 ${i}`} 주차 (${next.cells.length}칸 → ${normalCount}칸, 병합 ${merged.length}개 해제)`);
     });
+
+    repairSplitDate(xml, weekBlocks(xml, rows).filter((b) => !b.attend || !rebuilt.has(b.attend.start)),
+      edits, fixed);
   }
 
   return { xml: applyEdits(xml, edits), fixed };

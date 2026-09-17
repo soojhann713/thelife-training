@@ -6,11 +6,12 @@
 // 내보내기와 **같은 함수**(statusWeekPlan)를 써서 묶습니다. 그래서 이 목록이 맞으면
 // 실제 문서도 같게 찍히고, 목록이 틀리면 커리큘럼 관리에서 마감일만 고치면 됩니다.
 //
-// 묶는 규칙: 한 줄 = 그 강의일까지 내야 하는 과제 전부
-//            (= 직전 강의일 다음날 ~ 그 강의일 사이에 마감인 과제)
+// 묶는 규칙: 한 줄 = 그 강의일에 내준 과제 (= 마감일 직전 강의일 줄에 붙음)
+//            이 커리큘럼은 '마감 = 다음 강의일' 이라 1주차 과제는 3/15 에 걷지만 3/8 줄입니다.
 import JSZip from "jszip";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
+import { findElements, tableCells } from "../../js/hwpx/owpml.js";
 import { readStatusForm } from "../../js/hwpx/status.js";
 import { statusWeekPlan } from "../../js/hwpx/status-data.js";
 import { COURSES, findCourse, courseAssignments } from "../../js/assignments.js";
@@ -28,6 +29,26 @@ function taskLabel(t) {
   return `${head}${esc(t.title)}${t.due ? ` <sub>~${t.due.slice(5)}</sub>` : ""}`;
 }
 
+/** 양식에 인쇄된 주차 번호(과제 행 첫 칸) ↔ 주차 키. 종이 양식과 대조할 때 씁니다. */
+function printedWeekNo(xml, year) {
+  const norm = (s) => String(s ?? "").replace(/\s+/g, "");
+  const form = readStatusForm(xml, year);
+  const byKey = new Map();
+  const keys = form.tables.flatMap((t) => t.weeks.map((w) => w.key));
+  let i = 0;
+  for (const tbl of findElements(xml, "hp:tbl")) {
+    for (const r of findElements(xml, "hp:tr", tbl.start, tbl.end)) {
+      const cells = tableCells(xml, r.start, r.end);
+      const head = cells.find((c) => norm(c.text) === "생");
+      if (!head) continue;
+      const before = cells.filter((c) => c.start < head.start).map((c) => norm(c.text));
+      const key = keys[i++];
+      if (key) byKey.set(key, before[0] || "");
+    }
+  }
+  return byKey;
+}
+
 async function main() {
   const courseId = process.argv[2] || "disciple11";
   const course = findCourse(courseId);
@@ -43,16 +64,13 @@ async function main() {
 
   const plan = statusWeekPlan({ tasks, weekKeys: form.keys });
 
-  // 커리큘럼이 말하는 강의일(주차 정의에 적힌 값) — 양식에 그 줄이 있는지 대조합니다.
-  const lectureDays = new Set(tasks.filter((t) => t.week && t.lecture !== undefined)
-    .map((t) => t.due).filter(Boolean));
-
   const out = [];
   out.push(`# ${course.label} — 주차별 생/독 배정 점검`);
   out.push("");
   out.push(`양식: \`출석과제현황-빈양식.hwpx\` · 멤버 열 ${form.slots}개 · 주차 ${form.keys.length}개`);
   out.push("");
-  out.push("한 줄 = **그 강의일까지 내야 하는 과제 전부** (직전 강의일 다음날 ~ 그 강의일 사이 마감).");
+  out.push("한 줄 = **그 강의일에 내준 과제** (= 마감일 직전 강의일 줄).");
+  out.push("이 커리큘럼은 '마감 = 다음 강의일' 이라, 1주차 과제는 3/15 에 걷지만 **3/8 줄**에 체크합니다.");
   out.push("`~MM-DD` 는 그 과제의 마감일입니다. 어긋난 줄이 있으면 커리큘럼 관리에서 **마감일만** 고치면 됩니다.");
   out.push("");
 
@@ -67,14 +85,20 @@ async function main() {
     out.push("");
   }
 
+  const printed = printedWeekNo(section, year);
+
   out.push("## 주차별");
   out.push("");
-  out.push("| # | 강의일 | 생 (생활간증·기타) | 독 (독서) | 금 | 주 |");
-  out.push("| --- | --- | --- | --- | --- | --- |");
+  out.push("`주차` = 커리큘럼 주차(= 이 표의 순번). `양식#` = 종이 양식 왼쪽 끝에 인쇄된 번호.");
+  out.push("1학기는 `개강과제` 가 1번이라 양식# 가 주차보다 1 큽니다(양식 구조상 어쩔 수 없음).");
+  out.push("");
+  out.push("| 주차 | 양식# | 강의일 | 생 (생활간증·기타) | 독 (독서) | 금 | 주 |");
+  out.push("| --- | --- | --- | --- | --- | --- | --- |");
   plan.rows.forEach((r, i) => {
     const empty = !r.life.length && !r.read.length;
     const mark = empty ? " ⚠️" : "";
-    out.push(`| ${i + 1} | ${withDow(r.key)}${mark} | ${dash(r.life, taskLabel)} | ${dash(r.read, taskLabel)}`
+    out.push(`| ${i + 1} | ${printed.get(r.key) || "—"} | ${withDow(r.key)}${mark}`
+      + ` | ${dash(r.life, taskLabel)} | ${dash(r.read, taskLabel)}`
       + ` | ${r.fri.length || "—"} | ${r.sun.length || "—"} |`);
   });
   out.push("");
@@ -82,16 +106,17 @@ async function main() {
   /* ---- 확인이 필요한 것들 ---- */
   const notes = [];
 
-  const missingRow = [...lectureDays].filter((d) => !plan.lectures.includes(d)).sort();
-  if (missingRow.length) {
-    notes.push(`**양식에 줄이 없는 강의일**: ${missingRow.join(", ")}\n`
-      + "  → 그 날 마감인 과제는 *다음* 강의일 줄에 함께 들어갑니다(아래 '두 주치가 한 줄' 참고).");
+  const doubled = plan.rows.filter((r) => r.life.filter((t) => t.week).length > 1);
+  if (doubled.length) {
+    notes.push("**한 줄에 주차 과제가 2개 이상**(양식에 그 주차 줄이 없다는 뜻):\n"
+      + doubled.map((r) => `  - ${r.key} ← ${r.life.filter((t) => t.week).map((t) => `${t.week}주`).join(", ")}`).join("\n"));
   }
 
-  const doubled = plan.rows.filter((r) => r.life.length > 1);
-  if (doubled.length) {
-    notes.push("**한 줄에 생활간증이 2개 이상**(양식에 줄이 모자란 구간):\n"
-      + doubled.map((r) => `  - ${r.key} ← ${r.life.map((t) => t.week ? `${t.week}주` : t.title).join(", ")}`).join("\n"));
+  // 주차 과제가 아닌 것(서약서·종강 소감 등)이 주차 줄에 같이 올라탄 경우.
+  const riders = plan.rows.filter((r) => r.life.some((t) => !t.week) && r.life.some((t) => t.week));
+  if (riders.length) {
+    notes.push("**주차 과제에 다른 과제가 같이 올라탄 줄**(그 줄은 둘 다 내야 완료로 찍힙니다):\n"
+      + riders.map((r) => `  - ${r.key} ← ${r.life.map((t) => t.week ? `${t.week}주` : t.title).join(" + ")}`).join("\n"));
   }
 
   const blank = plan.rows.filter((r) => !r.life.length && !r.read.length);
@@ -109,12 +134,19 @@ async function main() {
       + "\n  → 방학 중 예배까지 커리큘럼에 들어 있으면 이렇게 됩니다. 그 줄은 전부 체크돼야 완료로 찍힙니다.");
   }
 
-  const why = { late: "마지막 강의일보다 늦게 마감", gap: "그 주차 줄이 양식에 없음" };
+  const why = { late: "마지막 강의일 뒤", gap: "그 주에 강의가 없음(방학 등)" };
   for (const reason of ["gap", "late"]) {
     const list = plan.unplaced.filter((t) => t.why === reason);
     if (!list.length) continue;
-    notes.push(`**놓일 줄이 없는 과제** — ${why[reason]} (문서에 안 찍힙니다):\n`
-      + list.map((t) => `  - ${t.due} · ${t.kind} · ${t.title}`).join("\n"));
+    // 설교간증은 방학마다 수십 건이라 한 줄로 줄입니다 — 나머지는 그대로 보여줍니다.
+    const sermon = list.filter((t) => t.kind === "설교간증");
+    const rest = list.filter((t) => t.kind !== "설교간증");
+    const lines = rest.map((t) => `  - ${t.due} · ${t.kind} · ${t.title}`);
+    if (sermon.length) {
+      const days = sermon.map((t) => t.due).sort();
+      lines.push(`  - 설교간증 ${sermon.length}건 (제출일 ${days[0]} ~ ${days[days.length - 1]})`);
+    }
+    notes.push(`**놓일 줄이 없는 과제** — ${why[reason]} (문서에 안 찍힙니다):\n${lines.join("\n")}`);
   }
 
   if (form.warnings.length) {

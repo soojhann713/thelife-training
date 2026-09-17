@@ -67,11 +67,15 @@ reviewable and repeatable (`fix-status-form.mjs` unmerged the 6/7·6/14 attendan
   Node tests: devDependency). Output must keep the source form's entry names/order with `mimetype`
   first and STORED.
 - `export-ui.js` — the modal (양식 → 반 → 과제 종류 → 과제; tasks listed due-date ascending).
-- **Status form rows are matched by lecture day, not by exact due date**: a row is "everything due
-  by that lecture", i.e. the first lecture day on or after a task's `due` (`statusWeekPlan`). The
-  lecture days come from the form itself, so `buildStatusDoc` is **async**. Look-back is capped at
-  the median lecture gap so a vacation (6/14 → 9/6) doesn't dump a whole summer into one row;
-  what doesn't fit is reported as `unplaced` rather than silently merged.
+- **Status form rows are matched by the lecture that *gave* the task, not by its due date**: a row
+  is "what was assigned at that lecture", i.e. the last lecture day strictly **before** a task's
+  `due` (`statusWeekPlan`). This curriculum has `due = next lecture`, so week 1's homework is
+  collected on 3/15 but ticked on the **3/8** row — that is what makes the form's week number line
+  up 1:1 with the curriculum week (22주 = 10/18, 26주 = 11/15). Don't "fix" it back to due-date
+  matching; a test asserts row *N* holds week *N*. The lecture days come from the form itself, so
+  `buildStatusDoc` is **async**. The span is capped at the median lecture gap so a vacation
+  (6/14 → 9/6) doesn't dump a whole summer into one row; what doesn't fit is reported as
+  `unplaced` rather than silently merged.
 - Tools: `make-status-template.mjs` (regenerate a blank form from a church original),
   `fix-status-form.mjs` (repair misaligned merges — idempotent),
   `status-week-list.mjs` (print which task lands on which row; uses the *same* `statusWeekPlan`
