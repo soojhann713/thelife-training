@@ -52,6 +52,7 @@ The web app's `js/firebase-config.js` `apiKey` is a public client value by desig
 - `config.js` — shared browser constants + QT-date parsing + color rules.
 - `assignments.js` — `COURSES` definition (see below).
 - `dashboard.js` — the bulk of the UI: dashboard, member tabs, member management, assignment status rendering.
+- `js/package.json` (`{"type":"module"}`) — declares these files as ES modules so Node (CI's `node --check`, and `scripts/test/*` importing `../../js/…`) parses them the same way the browser does. Not served to anyone; it is not a package.
 
 ### Scheduled jobs (`scripts/`)
 - `lib/scrape.js` — board scraping + QT-date parsing. Parses the list HTML by splitting on `class="mdDefaultW100 mdWebzinecon`, extracts title/link/date with regexes, filters out "공지" (notices) and posts before `START_DATE_STRING`. `fetchPostContent` pulls body text from detail pages.
@@ -75,6 +76,8 @@ The web app's `js/firebase-config.js` `apiKey` is a public client value by desig
 2. **The QT-date parser is the most safety-critical logic** — it drives completion aggregation and was carefully ported from the legacy script. It recognizes many title date formats (`260215`, `20260215`, `0215`, `2월15`, `2.15`, `02/15`) for a given year/month and returns in-range days. `scripts/test/qt-parse.test.js` guards it; extend the tests when touching it.
 
 3. **QT completion is counted by the date *in the post title*, not the collection date.** Aggregation dedups days via a `Set` (distinct days ÷ days-in-month).
+
+   The same rule governs **설교간증 / 예배은혜나눔** matching (`matchSermonPosts` in `js/assignments.js`): members often post days late, so **the date written in the title decides which service a post belongs to.** `sermonTitleDate` accepts the same formats as `extractQtDays` (`0904`, `260904`, `20260904`, `9월4일`, `9.4`, `9/4`) and guards against scripture ranges (`1-10절`). If a title carries a date, the post is matched *only* by exact service-date equality — never pulled onto another week by its posting date; if no task has that date, it stays unmatched (better blank than wrong). The posting-date window is a fallback for titles with no date, and even then a title naming the other service (금요↔주일) is rejected. `scripts/test/sermon-match.test.js` guards this; `scripts/audit-sermons.js` (Actions → Admin Tools → `audit-sermons`) re-runs the matcher over stored posts to review past results — it writes nothing.
 
 4. **Assignment curricula are runtime data in RTDB `/courses`**, edited via the web 커리큘럼 관리 screen. `js/assignments.js` `COURSES` is the **seed** written to `/courses` on first admin edit (`ensureCourseSeeded`); the dashboard merges code seed with RTDB (RTDB wins). Each task carries keyword lists (`m` = match, `x` = exclude) for auto-matching scraped `[훈련나눔]` titles; tasks with no keywords are manual checkboxes. **Due dates are per-class overrides** (`classes/<id>/due/<taskId>`), so one curriculum shared by several classes (e.g. 사역 토요반/일요반) differs only in due dates. Preserve existing task ids when editing the seed — `assignments/<name>/<taskId>` checkboxes key off them.
 

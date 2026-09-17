@@ -309,14 +309,48 @@ export function isSermonTask(task) {
   return !!sermonFields(task);
 }
 
-/** 제목에서 'M월 D일' / 'M.D' / 'M/D' 형태의 날짜를 뽑아 해당 연도의 ISO 로. */
-export function sermonDateFromTitle(title, year) {
+// 제목에서 날짜를 뽑습니다. 큐티 제목(extractQtDays)과 같은 표기를 모두 받습니다.
+//   20260904 / 260904 / 0904 / 9월4일 / 9.4 / 9/4 / 9-4
+// 앞의 형태일수록 확실하므로 순서대로 시도합니다(y 가 있으면 제목이 연도까지 말해 줍니다).
+const TITLE_DATE_PATTERNS = [
+  { re: /(?<!\d)(20\d{2})(\d{2})(\d{2})(?!\d)/g, y: 1, m: 2, d: 3 },            // 20260904
+  { re: /(?<!\d)(\d{2})(\d{2})(\d{2})(?!\d)/g, y: 1, m: 2, d: 3, short: true }, // 260904
+  { re: /(?<!\d)(\d{1,2})[월./-](\d{1,2})(?!\d)/g, m: 1, d: 2 },                // 9월4일 · 9.4 · 9/4 · 9-4
+  { re: /(?<!\d)(\d{2})(\d{2})(?!\d)/g, m: 1, d: 2 },                           // 0904
+];
+// 성경 구절이 날짜로 잡히지 않도록(예: "민수기20장1-10절" 의 "1-10").
+// ※ '주'는 넣으면 안 됩니다 — "0906주일예배" 의 날짜까지 버려집니다.
+const UNIT_AFTER = /[절장편권년호]/;
+
+/** 제목의 날짜 → { year|null, month, day }. 날짜가 없으면 null. */
+export function sermonTitleDate(title) {
   const norm = String(title ?? "").replace(/\s+/g, "");
-  const m = norm.match(/(?<!\d)(\d{1,2})[월./-](\d{1,2})/);
-  if (!m) return "";
-  const mm = +m[1], dd = +m[2];
-  if (mm < 1 || mm > 12 || dd < 1 || dd > 31) return "";
-  return `${year}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
+  for (const p of TITLE_DATE_PATTERNS) {
+    p.re.lastIndex = 0;
+    let m;
+    while ((m = p.re.exec(norm)) !== null) {
+      if (UNIT_AFTER.test(norm[m.index + m[0].length] || "")) continue;
+      const month = +m[p.m], day = +m[p.d];
+      if (month < 1 || month > 12 || day < 1 || day > 31) continue;
+      const year = p.y ? (p.short ? 2000 + +m[p.y] : +m[p.y]) : null;
+      return { year, month, day };
+    }
+  }
+  return null;
+}
+
+/** 제목에 날짜가 적혀 있는지 — 있으면 그 날짜가 예배일의 기준이 됩니다. */
+export function hasTitleDate(title) {
+  return !!sermonTitleDate(title);
+}
+
+/** 제목의 날짜를 ISO 로. 제목이 연도를 말하지 않으면 year 를 씁니다. */
+export function sermonDateFromTitle(title, year) {
+  const p = sermonTitleDate(title);
+  if (!p) return "";
+  const y = p.year || Number(year);
+  if (!y) return "";
+  return `${y}-${String(p.month).padStart(2, "0")}-${String(p.day).padStart(2, "0")}`;
 }
 
 /**
@@ -326,6 +360,10 @@ export function sermonDateFromTitle(title, year) {
  *   3점 = 제목의 날짜가 예배일과 일치          (가장 확실)
  *   2점 = 제목에 '금요'/'주일'이 있고 게시일이 구간 안
  *   1점 = 게시일만 구간 안
+ *
+ * ⚠️ **제목에 날짜가 적혀 있으면 그 날짜만 믿습니다(3점 전용).** 늦게 올리는 경우가 많아,
+ * 올린 날짜로 끌어오면 "0904 금요예배" 글이 9/11 금요예배로 붙어 버립니다.
+ * 게시일 기반(1·2점)은 제목에 날짜가 없는 글에만 씁니다.
  *
  * posts: [{ title, postDate('YYYY.MM.DD' 또는 'YYYY-MM-DD'), ... }]
  * 반환: { [taskId]: post }
@@ -340,21 +378,28 @@ export function matchSermonPosts(tasks, posts) {
   const norm = (s) => String(s ?? "").replace(/\s+/g, "");
   const toISO = (d) => String(d ?? "").replace(/\./g, "-").slice(0, 10);
 
+  const infos = posts.map((post) => ({
+    post,
+    title: norm(post.title),
+    posted: toISO(post.postDate),
+    dated: hasTitleDate(post.title), // 제목에 날짜가 있는 글 → 날짜로만 붙습니다
+  }));
+
   const cands = [];
   for (const task of sermons) {
-    // 예배 하루 전부터 제출일까지 올라온 글을 후보로 봅니다.
+    // 제목에 날짜가 없는 글은 예배 하루 전부터 제출일까지 올라온 것을 후보로 봅니다.
     const from = addDays(task.serviceDate, -1);
     const to = task.due;
-    for (const post of posts) {
-      const title = norm(post.title);
-      const posted = toISO(post.postDate);
+    const other = task.service === "금요" ? "주일" : "금요";
+    const year = task.serviceDate.slice(0, 4);
+    for (const info of infos) {
       let score = 0;
-      const year = task.serviceDate.slice(0, 4);
-      if (sermonDateFromTitle(post.title, year) === task.serviceDate) score = 3;
-      else if (posted >= from && posted <= to) {
-        score = title.includes(task.service) ? 2 : 1;
+      if (sermonDateFromTitle(info.post.title, year) === task.serviceDate) score = 3;
+      else if (!info.dated && info.posted >= from && info.posted <= to && !info.title.includes(other)) {
+        // 다른 예배(금요↔주일)라고 제목에 적힌 글은 게시일이 맞아도 후보에서 뺍니다.
+        score = info.title.includes(task.service) ? 2 : 1;
       }
-      if (score) cands.push({ score, task, post, posted });
+      if (score) cands.push({ score, task, post: info.post, posted: info.posted });
     }
   }
 
