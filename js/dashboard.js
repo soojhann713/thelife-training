@@ -24,7 +24,7 @@ import {
   matchSermonPosts,
 } from "./assignments.js";
 import { initExport, cohortOf, docTitleFor, fileNameFor } from "./hwpx/export-ui.js";
-import { safeFileName } from "./hwpx/build.js";
+import { safeFileName, statusFormInfo } from "./hwpx/build.js";
 import { statusValues, titleParts, isoAdd } from "./hwpx/status-data.js";
 import { toParagraphs } from "./hwpx/compile.js";
 
@@ -1120,8 +1120,10 @@ function exportContext() {
         .sort((a, b) => a.label.localeCompare(b.label, "ko"));
     },
 
+    // 제출일 오름차순(같은 날은 커리큘럼 순서). 내보내기 모달이 이 순서를 그대로 씁니다.
     listTasks(classId) {
-      return tasksOf(classId).filter((t) => t.due).sort((a, b) => (a.due < b.due ? 1 : -1));
+      return tasksOf(classId).filter((t) => t.due).sort((a, b) =>
+        (a.due < b.due ? -1 : a.due > b.due ? 1 : (a.order ?? 0) - (b.order ?? 0)));
     },
 
     buildDoc(classId, taskId) {
@@ -1150,6 +1152,7 @@ function exportContext() {
       };
     },
 
+    // 양식에서 강의일 목록을 읽어 와야 해서 비동기입니다(양식 파일은 한 번만 받아 캐시됩니다).
     buildStatusDoc(classId) {
       const members = activeOf(classId);
       if (!members.length) throw new Error("이 반에 수집 대상 멤버가 없습니다");
@@ -1182,7 +1185,7 @@ function isDone(name, taskId) {
   return !!(autoAssign[name] || {})[taskId] || !!(assignStatus[name] || {})[taskId];
 }
 
-function statusDoc(classId, names, tasks) {
+async function statusDoc(classId, names, tasks) {
   const today = todayISO();
   const dues = tasks.map((t) => t.due).filter(Boolean).sort();
   const from = isoAdd(dues[0] || today, -7);
@@ -1193,7 +1196,14 @@ function statusDoc(classId, names, tasks) {
     return qtCache.get(name);
   };
 
-  const { values, start, year } = statusValues({ names, tasks, today, isDone, qtDays });
+  // 양식이 가진 강의일로 과제를 묶습니다 — '그 강의일까지 내야 하는 과제'가 한 줄에 모이도록.
+  // 양식을 못 읽으면(오프라인 등) 마감일+주일로 추정하는 폴백이 status-data.js 에 있습니다.
+  let weekKeys = null;
+  try {
+    weekKeys = (await statusFormInfo(+(dues[0] || today).slice(0, 4))).keys;
+  } catch (_) { /* 폴백으로 진행 */ }
+
+  const { values, start, year } = statusValues({ names, tasks, today, isDone, qtDays, weekKeys });
   const title = titleParts(classLabelOf(classId), year, start);
   return {
     year, title, members: names, values,

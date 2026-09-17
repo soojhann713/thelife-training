@@ -12,7 +12,7 @@ import {
   CHAR_DONE, CHAR_MISS, CHAR_NA,
 } from "../../js/hwpx/status.js";
 import { buildStatusHwpx } from "../../js/hwpx/build.js";
-import { statusValues, titleParts, isoAdd } from "../../js/hwpx/status-data.js";
+import { statusValues, statusWeekPlan, titleParts, isoAdd } from "../../js/hwpx/status-data.js";
 import { COURSES, courseAssignments, sermonItems } from "../../js/assignments.js";
 
 const TEMPLATE = fileURLToPath(new URL("../../assets/templates/출석과제현황-빈양식.hwpx", import.meta.url));
@@ -67,14 +67,41 @@ test("readStatusForm: 주차 번호를 날짜로 잘못 읽지 않는다", async
   assert.ok(!form.keys.includes("2026-11-27"));
 });
 
-test("readStatusForm: 멤버 열 수와 안 맞는 행을 경고로 알린다", async () => {
+test("readStatusForm: 모든 주차가 같은 6칸 양식이다", async () => {
   const form = readStatusForm(await section(), YEAR);
-  // 양식의 6/7·6/14 출석 행은 셀 병합이 어긋나 13칸이 안 나옵니다.
-  assert.equal(form.warnings.length, 2);
-  assert.ok(form.warnings.every((w) => w.includes("출석 행")));
-  const bad = form.tables[0].weeks.filter((w) => !w.attendOk && w.attend);
-  assert.equal(bad.length, 2);
-  assert.ok(bad.every((w) => w.taskOk)); // 과제 행은 정상이라 그건 채웁니다
+  // 교회 원본은 6/7·6/14 주차만 '생' 칸이 rowSpan=2 라 출석 행이 26칸이었습니다.
+  // scripts/tools/fix-status-form.mjs 로 바로잡았으므로 이제 어긋난 행이 없어야 합니다.
+  assert.equal(form.warnings.length, 0, form.warnings.join(" · "));
+  for (const t of form.tables) {
+    for (const w of t.weeks) {
+      if (!w.key) continue;
+      assert.ok(w.taskOk, `${w.key} 과제 행이 ${w.task.length}/${form.slots} 칸`);
+      if (w.attend) assert.ok(w.attendOk, `${w.key} 출석 행이 ${w.attend.length}/${form.slots} 칸`);
+    }
+  }
+});
+
+// 안전장치(칸 수가 안 맞으면 그 행은 건드리지 않음)는 남겨 두고, 일부러 망가뜨린 양식으로 확인합니다.
+// 양식을 고쳤다고 해서 가드를 지우면, 다음에 양식이 또 어긋났을 때 남의 칸에 쓰게 됩니다.
+function breakAttendRow(xml, key) {
+  const form = readStatusForm(xml, YEAR);
+  for (const t of form.tables) {
+    for (const w of t.weeks) {
+      if (w.key !== key || !w.attend) continue;
+      const last = w.attend[w.attend.length - 1];
+      return applyEdits(xml, last.map((c) => ({ start: c.start, end: c.end, xml: "" })));
+    }
+  }
+  throw new Error(`${key} 주차의 출석 행을 찾지 못했습니다`);
+}
+
+test("readStatusForm: 칸 수가 어긋난 행은 경고로 알린다", async () => {
+  const form = readStatusForm(breakAttendRow(await section(), "2026-06-07"), YEAR);
+  assert.equal(form.warnings.length, 1);
+  assert.ok(form.warnings[0].includes("출석 행"));
+  const bad = form.tables.flatMap((t) => t.weeks).filter((w) => w.attend && !w.attendOk);
+  assert.equal(bad.length, 1);
+  assert.ok(bad[0].taskOk); // 과제 행은 멀쩡하니 그건 채웁니다
 });
 
 test("빈 양식에는 이름과 완료 표시가 남아 있지 않다", async () => {
@@ -164,8 +191,20 @@ test("compileStatusSection: '해당 없음'(취소선) 칸은 건드리지 않�
   assert.equal(cellsOf(out, "2026-03-15", 0).life.charPr, CHAR_DONE);
 });
 
+test("compileStatusSection: 고친 6/7 주차도 금/주를 채운다", async () => {
+  const out = compileStatusSection(await section(), {
+    year: YEAR, members: MEMBERS,
+    values: { "2026-06-07": { 가나다: { life: true, read: true, fri: true, sun: false, qt: 7 } } },
+  });
+  const cells = cellsOf(out, "2026-06-07", 0);
+  assert.equal(cells.life.charPr, CHAR_DONE);
+  assert.equal(cells.fri.charPr, CHAR_DONE);
+  assert.equal(cells.sun.charPr, CHAR_MISS);
+  assert.equal(cells.att.charPr, CHAR_MISS); // 강의 출석은 여전히 손대지 않습니다
+});
+
 test("compileStatusSection: 칸 수가 어긋난 출석 행은 채우지 않는다", async () => {
-  const xml = await section();
+  const xml = breakAttendRow(await section(), "2026-06-07");
   const out = compileStatusSection(xml, {
     year: YEAR, members: MEMBERS,
     values: { "2026-06-07": { 가나다: { life: true, read: true, fri: true, sun: true, qt: 7 } } },
@@ -352,6 +391,56 @@ test("statusValues: 아직 오지 않은 주차는 값을 만들지 않는다", 
   assert.ok(!values["2026-05-31"]);
 });
 
+/* ---------- 강의일 기준으로 묶기 ---------- */
+
+const WEEKLY = ["2026-05-03", "2026-05-10", "2026-05-17", "2026-05-24"];
+
+test("statusWeekPlan: 강의일까지 마감인 과제를 그 강의일 줄에 모은다", () => {
+  const tasks = [
+    { id: "a", kind: "생활간증", due: "2026-05-06" },  // 수요일 마감 → 5/10 강의일 줄
+    { id: "b", kind: "독서", due: "2026-05-10" },      // 강의일 당일 마감 → 같은 줄
+    { id: "c", kind: "생활간증", due: "2026-05-17" },
+  ];
+  const plan = statusWeekPlan({ tasks, weekKeys: WEEKLY });
+  const row = (k) => plan.rows.find((r) => r.key === k);
+  assert.deepEqual(row("2026-05-10").life.map((t) => t.id), ["a"]);
+  assert.deepEqual(row("2026-05-10").read.map((t) => t.id), ["b"]);
+  assert.deepEqual(row("2026-05-17").life.map((t) => t.id), ["c"]);
+  assert.deepEqual(row("2026-05-03").life, []);
+  assert.deepEqual(plan.unplaced, []);
+});
+
+test("statusWeekPlan: 주차 간격보다 멀리 거슬러 올라가지 않는다(방학)", () => {
+  // 5/24 다음 강의일이 9/6 이면, 그 사이 과제를 9/6 줄에 몰아넣지 않습니다.
+  const keys = [...WEEKLY, "2026-09-06", "2026-09-13"];
+  const tasks = [
+    { id: "vacation", kind: "생활간증", due: "2026-06-21" },
+    { id: "just-before", kind: "생활간증", due: "2026-08-31" }, // 9/6 에서 6일 전 → 들어갑니다
+  ];
+  const plan = statusWeekPlan({ tasks, weekKeys: keys });
+  const sept = plan.rows.find((r) => r.key === "2026-09-06");
+  assert.deepEqual(sept.life.map((t) => t.id), ["just-before"]);
+  assert.deepEqual(plan.unplaced.map((t) => [t.id, t.why]), [["vacation", "gap"]]);
+});
+
+test("statusWeekPlan: 마지막 강의일보다 늦게 마감인 과제는 놓일 줄이 없다", () => {
+  const tasks = [{ id: "final", kind: "생활간증", due: "2026-05-31" }];
+  const plan = statusWeekPlan({ tasks, weekKeys: WEEKLY });
+  assert.deepEqual(plan.unplaced.map((t) => [t.id, t.why]), [["final", "late"]]);
+  assert.ok(plan.rows.every((r) => !r.life.length));
+});
+
+test("statusValues: weekKeys 를 주면 그 강의일 줄로만 값을 만든다", () => {
+  const tasks = [{ id: "a", kind: "생활간증", due: "2026-05-06" }];
+  const { values } = statusValues({
+    names: ["갑"], tasks, today: "2026-05-31", weekKeys: WEEKLY,
+    isDone: () => true, qtDays: NO_QT,
+  });
+  assert.deepEqual(Object.keys(values).sort(), WEEKLY);
+  assert.equal(values["2026-05-10"].갑.life, true);
+  assert.equal(values["2026-05-06"], undefined); // 마감일 자체는 줄이 되지 않습니다
+});
+
 test("titleParts: 반 이름에서 기수·과정·요일을 뽑는다", () => {
   assert.deepEqual(titleParts("제자반 11기 (주일반)", 2026, "2026-03-08"), {
     year: 2026, cohort: "11", course: "제자", day: "주일", start: "2026-03-08",
@@ -366,17 +455,37 @@ test("titleParts: 반 이름에서 기수·과정·요일을 뽑는다", () => {
 test("실제 커리큘럼(제자반 11기)이 양식의 주차와 맞물린다", async () => {
   const course = COURSES.find((c) => c.id === "disciple11");
   const tasks = courseAssignments(course);
-  const { values } = statusValues({
-    names: ["갑"], tasks, today: "2026-12-31", isDone: () => true, qtDays: NO_QT,
-  });
   const form = readStatusForm(await section(), YEAR);
+  const { values } = statusValues({
+    names: ["갑"], tasks, today: "2026-12-31", weekKeys: form.keys,
+    isDone: () => true, qtDays: NO_QT,
+  });
 
   // 양식의 날짜 줄 가운데 값이 만들어지지 않은 줄이 없어야 합니다(날짜 해석이 어긋나면 여기서 걸립니다).
-  const missing = form.keys.filter((k) => !values[k]);
-  assert.deepEqual(missing, []);
+  assert.deepEqual(form.keys.filter((k) => !values[k]), []);
 
   // 설교간증은 개강~종강 사이 모든 금·주일이라 양식의 거의 모든 주차에 금·주가 붙습니다.
   const dated = form.keys.filter((k) => /^\d{4}-/.test(k));
   const withSermon = dated.filter((k) => values[k].갑.fri === true && values[k].갑.sun === true);
   assert.ok(withSermon.length >= dated.length - 2, `금·주가 붙은 주차 ${withSermon.length}/${dated.length}`);
+});
+
+test("실제 커리큘럼: 양식에 줄이 없는 주차는 조용히 합치지 않고 알린다", async () => {
+  const course = COURSES.find((c) => c.id === "disciple11");
+  const form = readStatusForm(await section(), YEAR);
+  const plan = statusWeekPlan({ tasks: courseAssignments(course), weekKeys: form.keys });
+
+  // 양식에 1학기 종강(6/21)·2학기 종강(11/22) 줄이 없어 그 주 과제는 놓일 자리가 없습니다.
+  // 방학(6/14→9/6) 사이 설교간증도 마찬가지 — 9/6 줄로 쏟아져 들어가면 안 됩니다.
+  const byWhy = (w) => plan.unplaced.filter((t) => t.why === w);
+  assert.ok(byWhy("gap").some((t) => t.due === "2026-06-21"), "6/21 과제가 gap 으로 빠져야 합니다");
+  assert.ok(byWhy("late").some((t) => t.due === "2026-11-22"), "11/22 과제가 late 로 빠져야 합니다");
+
+  const sept = plan.rows.find((r) => r.key === "2026-09-06");
+  assert.ok(sept.fri.length <= 2 && sept.sun.length <= 2,
+    `9/6 줄에 예배가 ${sept.fri.length}/${sept.sun.length} 개 — 방학치가 쏟아져 들어왔습니다`);
+
+  // 10/18 강의일 줄이 양식에 없어서 21·22주가 10/25 한 줄에 묶입니다(알고 쓰는 것).
+  const oct = plan.rows.find((r) => r.key === "2026-10-25");
+  assert.equal(oct.life.length, 2);
 });
