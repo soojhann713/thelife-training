@@ -18,7 +18,7 @@ jobs:
 
       - name: JS 문법 검사 (node --check)
         run: |
-          files=$(find js scripts -name '*.js' -not -path '*/node_modules/*')
+          files=$(find js scripts \( -name '*.js' -o -name '*.mjs' \) -not -path '*/node_modules/*')
           for f in $files; do echo "check $f"; node --check "$f"; done
 
       - name: scripts 의존성 설치

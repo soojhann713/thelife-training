@@ -150,6 +150,28 @@ export function setCellText(tc, text) {
   return setCellParagraphs(tc, text ? [text] : []);
 }
 
+/** 셀 안 첫 hp:run 의 글자모양 id (없으면 -1). */
+export function cellCharPr(tc) {
+  const m = String(tc).match(/<hp:run\s[^>]*?charPrIDRef="(\d+)"/);
+  return m ? +m[1] : -1;
+}
+
+/**
+ * 셀 안 모든 hp:run 의 글자모양 id 를 바꿉니다.
+ * 출석·과제현황표는 완료/미완료를 **글자모양(색·굵기)으로만** 나타내서, 이 함수가 곧 체크 표시입니다.
+ */
+export function setCellCharPr(tc, id) {
+  return String(tc).replace(/(<hp:run\s[^>]*?charPrIDRef=")\d+(")/g, `$1${id}$2`);
+}
+
+/** 원본 XML 의 여러 구간을 한꺼번에 갈아끼웁니다(뒤에서부터 잘라 붙여 위치가 밀리지 않게). */
+export function applyEdits(xml, edits) {
+  const sorted = [...edits].sort((a, b) => b.start - a.start);
+  let out = xml;
+  for (const e of sorted) out = out.slice(0, e.start) + e.xml + out.slice(e.end);
+  return out;
+}
+
 /**
  * 라벨 셀을 앵커로 삼아 **그 다음 셀**의 인덱스를 돌려줍니다.
  * 못 찾으면 던집니다 — 조용히 엉뚱한 칸에 쓰는 것보다 낫습니다.

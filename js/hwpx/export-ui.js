@@ -1,6 +1,7 @@
 // 과제 취합문서 내보내기 모달.
 // 데이터는 대시보드가 `ctx` 로 넘겨줍니다(여기서 Firebase 를 직접 읽지 않습니다).
-import { buildHwpxBlob, downloadBlob, safeFileName } from "./build.js";
+import { buildHwpxBlob, buildStatusBlob, statusFormInfo, downloadBlob, safeFileName } from "./build.js";
+import { SERMON_KIND } from "../assignments.js";
 
 // 과제 종류 → 양식 문서 제목 문구 (원본 양식 표기를 그대로 재현).
 const DOC_TITLE = {
@@ -33,8 +34,20 @@ function esc(s) {
   ));
 }
 
+// 과제 종류 고르는 순서. 여기 없는 종류는 뒤에 가나다순으로 붙습니다.
+const KIND_ORDER = ["생활간증", "독서", SERMON_KIND];
+const OTHER_KIND = "기타";
+const kindOf = (t) => t.kind || OTHER_KIND;
+const kindRank = (k) => {
+  const i = KIND_ORDER.indexOf(k);
+  return i < 0 ? KIND_ORDER.length : i;
+};
+/** 제출일을 "3/15" 처럼 짧게. 목록이 날짜 오름차순이라 날짜를 앞에 둡니다. */
+const shortDue = (due) => (due ? `${+due.slice(5, 7)}/${+due.slice(8, 10)}` : "미정");
+
 let ctx = null;
 let modal = null;
+let taskPool = [];   // 지금 고른 반의 과제 전부(날짜 오름차순)
 
 function el(id) { return document.getElementById(id); }
 
@@ -47,7 +60,9 @@ export function initExport(context) {
   el("export-open")?.addEventListener("click", openModal);
   el("export-modal-close")?.addEventListener("click", closeModal);
   modal.addEventListener("click", (e) => { if (e.target === modal) closeModal(); });
-  el("export-class")?.addEventListener("change", fillTasks);
+  el("export-kind")?.addEventListener("change", () => { syncKind(); fillCategories(); });
+  el("export-class")?.addEventListener("change", fillCategories);
+  el("export-category")?.addEventListener("change", fillTasks);
   el("export-task")?.addEventListener("change", preview);
   el("export-run")?.addEventListener("click", run);
 }
@@ -58,23 +73,57 @@ function openModal() {
   sel.innerHTML = classes.length
     ? classes.map((c) => `<option value="${esc(c.id)}">${esc(c.label)}</option>`).join("")
     : `<option value="">내보낼 수 있는 반이 없습니다</option>`;
-  fillTasks();
+  syncKind();
+  fillCategories();
   modal.hidden = false;
 }
 
 function closeModal() { modal.hidden = true; }
 
-function fillTasks() {
+function kind() { return el("export-kind")?.value || "task"; }
+
+// 현황표는 반 하나를 통째로 뽑기 때문에 과제 선택이 필요 없습니다.
+function syncKind() {
+  const status = kind() === "status";
+  for (const id of ["export-category", "export-category-label", "export-task", "export-task-label"]) {
+    const node = el(id);
+    if (node) node.hidden = status;
+  }
+}
+
+/** 1단계: 큰 분류(생활간증 / 독서 / 설교간증 …). 반을 바꿔도 보던 분류를 지킵니다. */
+function fillCategories() {
   const classId = el("export-class").value;
-  const tasks = classId ? ctx.listTasks(classId) : [];
-  el("export-task").innerHTML = tasks.length
-    ? tasks.map((t) => `<option value="${esc(t.id)}">${esc(t.kind)} · ${esc(t.title)}${t.due ? ` (~${esc(t.due.slice(5))})` : ""}</option>`).join("")
+  taskPool = (classId && kind() === "task") ? ctx.listTasks(classId) : [];
+
+  const sel = el("export-category");
+  const counts = new Map();
+  for (const t of taskPool) counts.set(kindOf(t), (counts.get(kindOf(t)) || 0) + 1);
+  const kinds = [...counts.keys()]
+    .sort((a, b) => kindRank(a) - kindRank(b) || a.localeCompare(b, "ko"));
+
+  const keep = sel.value;
+  sel.innerHTML = kinds.length
+    ? kinds.map((k) => `<option value="${esc(k)}">${esc(k)} (${counts.get(k)})</option>`).join("")
+    : `<option value="">과제가 없습니다</option>`;
+  if (kinds.includes(keep)) sel.value = keep;
+  fillTasks();
+}
+
+/** 2단계: 고른 분류 안의 과제. ctx.listTasks 가 이미 제출일 오름차순입니다. */
+function fillTasks() {
+  const cat = el("export-category").value;
+  const list = taskPool.filter((t) => kindOf(t) === cat);
+  el("export-task").innerHTML = list.length
+    ? list.map((t) =>
+      `<option value="${esc(t.id)}">${esc(shortDue(t.due))} · ${esc(t.title)}</option>`).join("")
     : `<option value="">과제가 없습니다</option>`;
   preview();
 }
 
 // 선택한 과제로 무엇이 나갈지 먼저 보여줍니다 — 자동 매칭이 틀렸을 때 여기서 걸러집니다.
 function preview() {
+  if (kind() === "status") return previewStatus();
   const box = el("export-preview");
   const btn = el("export-run");
   const classId = el("export-class").value;
@@ -111,6 +160,56 @@ function preview() {
   btn.disabled = false;
 }
 
+// 현황표 미리보기: 멤버별로 무엇이 채워지는지 합계만 보여줍니다(칸이 너무 많아 표로는 못 보여줌).
+async function previewStatus() {
+  const box = el("export-preview");
+  const btn = el("export-run");
+  const classId = el("export-class").value;
+  if (!classId) {
+    box.innerHTML = `<p class="muted">반을 선택하세요.</p>`;
+    btn.disabled = true;
+    return;
+  }
+  let doc;
+  try {
+    doc = await ctx.buildStatusDoc(classId); // 양식에서 강의일을 읽어 오므로 비동기입니다
+  } catch (e) {
+    box.innerHTML = `<p class="export-warn">${esc(e.message)}</p>`;
+    btn.disabled = true;
+    return;
+  }
+  const keys = Object.keys(doc.values).sort();
+  const rows = doc.members.map((name) => {
+    let life = 0, read = 0, fri = 0, sun = 0, qt = 0;
+    for (const k of keys) {
+      const v = (doc.values[k] || {})[name] || {};
+      if (v.life) life++;
+      if (v.read) read++;
+      if (v.fri) fri++;
+      if (v.sun) sun++;
+      if (typeof v.qt === "number") qt += v.qt;
+    }
+    return `<tr><td>${esc(name)}</td><td>${life}</td><td>${read}</td><td>${fri}</td><td>${sun}</td><td>${qt}</td></tr>`;
+  }).join("");
+
+  let info = null;
+  try { info = await statusFormInfo(doc.year); } catch (_) { /* 양식 정보는 없어도 내보낼 수 있습니다 */ }
+  const over = info && doc.members.length > info.slots
+    ? `<p class="export-warn">양식의 이름 칸은 ${info.slots}개인데 멤버가 ${doc.members.length}명입니다 —
+       앞 ${info.slots}명만 들어갑니다.</p>` : "";
+  const warn = info && info.warnings.length
+    ? `<p class="export-warn">양식의 셀 병합이 어긋난 행은 건드리지 않습니다: ${esc(info.warnings.join(" · "))}</p>` : "";
+
+  box.innerHTML = `
+    <p class="export-meta">${esc(doc.title.text)} · 멤버 ${doc.members.length}명 · 주차 ${keys.length}개</p>
+    <p class="export-warn">강의 출석(출)은 자동으로 알 수 없어 비워서 내보냅니다 — 한글에서 직접 체크하세요.</p>
+    ${over}${warn}
+    <table class="export-table">
+      <thead><tr><th>성함</th><th>생</th><th>독</th><th>금</th><th>주</th><th>큐티(일)</th></tr></thead>
+      <tbody>${rows}</tbody></table>`;
+  btn.disabled = false;
+}
+
 async function run() {
   const btn = el("export-run");
   const box = el("export-status");
@@ -119,8 +218,9 @@ async function run() {
   btn.disabled = true;
   box.textContent = "문서를 만드는 중…";
   try {
-    const doc = ctx.buildDoc(classId, taskId);
-    const blob = await buildHwpxBlob(doc);
+    const status = kind() === "status";
+    const doc = status ? await ctx.buildStatusDoc(classId) : ctx.buildDoc(classId, taskId);
+    const blob = status ? await buildStatusBlob(doc) : await buildHwpxBlob(doc);
     downloadBlob(blob, doc.파일명);
     box.textContent = `내려받았습니다 — ${doc.파일명}`;
   } catch (e) {

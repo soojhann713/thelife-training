@@ -54,6 +54,38 @@ The web app's `js/firebase-config.js` `apiKey` is a public client value by desig
 - `dashboard.js` — the bulk of the UI: dashboard, member tabs, member management, assignment status rendering.
 - `js/package.json` (`{"type":"module"}`) — declares these files as ES modules so Node (CI's `node --check`, and `scripts/test/*` importing `../../js/…`) parses them the same way the browser does. Not served to anyone; it is not a package.
 
+### HWPX export (`js/hwpx/`, blank forms in `assets/templates/`)
+Fills the church's own Hangul (`.hwpx`) forms from dashboard state and downloads them in the browser.
+`assets/templates/*-빈양식.hwpx` are the real church forms with all content emptied. **The exporter
+never edits a form at run time** — it only clones nodes or flips cell styles. The committed blanks
+themselves are only ever changed by a tool in `scripts/tools/`, never by hand, so the change is
+reviewable and repeatable (`fix-status-form.mjs` unmerged the 6/7·6/14 attendance rows).
+- `owpml.js` / `compile.js` / `status.js` / `status-data.js` — **pure string/XML functions, no
+  DOM/Firebase/JSZip imports.** The Node tests (`scripts/test/hwpx*.test.js`) import these browser
+  files directly, so there is no web/Node code duplication to keep in sync (cf. invariant 1).
+  Never add a DOM, Firebase, or JSZip import to them.
+- `zip.js` / `build.js` — ZIP handling; JSZip is *injected* (browser: CDN `window.JSZip` lazy-loaded,
+  Node tests: devDependency). Output must keep the source form's entry names/order with `mimetype`
+  first and STORED.
+- `export-ui.js` — the modal (양식 → 반 → 과제 종류 → 과제; tasks listed due-date ascending).
+- **Status form rows are matched by the lecture that *gave* the task, not by its due date**: a row
+  is "what was assigned at that lecture", i.e. the last lecture day strictly **before** a task's
+  `due` (`statusWeekPlan`). This curriculum has `due = next lecture`, so week 1's homework is
+  collected on 3/15 but ticked on the **3/8** row — that is what makes the form's week number line
+  up 1:1 with the curriculum week (22주 = 10/18, 26주 = 11/15). Don't "fix" it back to due-date
+  matching; a test asserts row *N* holds week *N*. The lecture days come from the form itself, so
+  `buildStatusDoc` is **async**. The span is capped at the *modal* lecture gap (mode, not mean or
+  median — one vacation gap must not stretch what "a week" means) so 6/14 → 9/6 doesn't dump a
+  whole summer into one row; what doesn't fit is reported as `unplaced` rather than silently
+  merged. The QT-day count on a row runs **forward** over that same span (lecture day → day before
+  the next lecture), so every column on a row describes the same week.
+- Tools: `make-status-template.mjs` (regenerate a blank form from a church original),
+  `fix-status-form.mjs` (repair misaligned merges — idempotent),
+  `status-week-list.mjs` (print which task lands on which row; uses the *same* `statusWeekPlan`
+  as the exporter, so the list and the document can't disagree).
+- Design notes and the church forms' quirks (`charPrIDRef` 13/20/32 = done/not-done/N-A, rows the
+  form is missing entirely) are in `PLAN-HWPX.md`.
+
 ### Scheduled jobs (`scripts/`)
 - `lib/scrape.js` — board scraping + QT-date parsing. Parses the list HTML by splitting on `class="mdDefaultW100 mdWebzinecon`, extracts title/link/date with regexes, filters out "공지" (notices) and posts before `START_DATE_STRING`. `fetchPostContent` pulls body text from detail pages.
 - `lib/firebase.js` — `firebase-admin` init (service account → RTDB).

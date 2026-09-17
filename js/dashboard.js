@@ -24,6 +24,8 @@ import {
   matchSermonPosts,
 } from "./assignments.js";
 import { initExport, cohortOf, docTitleFor, fileNameFor } from "./hwpx/export-ui.js";
+import { safeFileName, statusFormInfo } from "./hwpx/build.js";
+import { statusValues, titleParts, isoAdd } from "./hwpx/status-data.js";
 import { toParagraphs } from "./hwpx/compile.js";
 
 function esc(s) {
@@ -1118,8 +1120,10 @@ function exportContext() {
         .sort((a, b) => a.label.localeCompare(b.label, "ko"));
     },
 
+    // 제출일 오름차순(같은 날은 커리큘럼 순서). 내보내기 모달이 이 순서를 그대로 씁니다.
     listTasks(classId) {
-      return tasksOf(classId).filter((t) => t.due).sort((a, b) => (a.due < b.due ? 1 : -1));
+      return tasksOf(classId).filter((t) => t.due).sort((a, b) =>
+        (a.due < b.due ? -1 : a.due > b.due ? 1 : (a.order ?? 0) - (b.order ?? 0)));
     },
 
     buildDoc(classId, taskId) {
@@ -1147,6 +1151,64 @@ function exportContext() {
         파일명: fileNameFor(cohort, task.kind, task.due),
       };
     },
+
+    // 양식에서 강의일 목록을 읽어 와야 해서 비동기입니다(양식 파일은 한 번만 받아 캐시됩니다).
+    buildStatusDoc(classId) {
+      const members = activeOf(classId);
+      if (!members.length) throw new Error("이 반에 수집 대상 멤버가 없습니다");
+      return statusDoc(classId, members.map((m) => m.name), tasksOf(classId));
+    },
+  };
+}
+
+/* ---- 출석·과제현황표(주차별 체크리스트)용 집계 ---- */
+// 맞추는 규칙은 js/hwpx/status-data.js 에 있습니다(순수 함수 — 테스트가 그 파일을 직접 씁니다).
+// 여기서는 대시보드가 들고 있는 상태(수집 글·수동 체크·큐티 기록)를 그 함수에 넘겨주기만 합니다.
+
+// 한 멤버의 [fromISO, toISO] 사이 큐티 완주일 집합 (수동 기록 포함 — memberQtData 와 같은 기준).
+function qtDaySet(name, fromISO, toISO) {
+  const set = new Set();
+  let y = +fromISO.slice(0, 4), m = +fromISO.slice(5, 7);
+  const last = (+toISO.slice(0, 4)) * 12 + (+toISO.slice(5, 7));
+  while (y * 12 + m <= last) {
+    const dim = new Date(y, m, 0).getDate();
+    for (const d of memberQtData(name, y, m, dim).uniqueDays) {
+      const key = `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+      if (key >= fromISO && key <= toISO) set.add(key);
+    }
+    m++; if (m > 12) { m = 1; y++; }
+  }
+  return set;
+}
+
+function isDone(name, taskId) {
+  return !!(autoAssign[name] || {})[taskId] || !!(assignStatus[name] || {})[taskId];
+}
+
+async function statusDoc(classId, names, tasks) {
+  const today = todayISO();
+  const dues = tasks.map((t) => t.due).filter(Boolean).sort();
+  // 큐티 창이 강의일부터 **앞으로** 한 주라, 마지막 강의일 뒤까지 넉넉히 읽어 둡니다.
+  const from = isoAdd(dues[0] || today, -7);
+  const to = isoAdd(dues[dues.length - 1] || today, 7);
+  const qtCache = new Map();
+  const qtDays = (name) => {
+    if (!qtCache.has(name)) qtCache.set(name, qtDaySet(name, from, to));
+    return qtCache.get(name);
+  };
+
+  // 양식이 가진 강의일로 과제를 묶습니다 — '그 강의일까지 내야 하는 과제'가 한 줄에 모이도록.
+  // 양식을 못 읽으면(오프라인 등) 마감일+주일로 추정하는 폴백이 status-data.js 에 있습니다.
+  let weekKeys = null;
+  try {
+    weekKeys = (await statusFormInfo(+(dues[0] || today).slice(0, 4))).keys;
+  } catch (_) { /* 폴백으로 진행 */ }
+
+  const { values, start, year } = statusValues({ names, tasks, today, isDone, qtDays, weekKeys });
+  const title = titleParts(classLabelOf(classId), year, start);
+  return {
+    year, title, members: names, values,
+    파일명: `${safeFileName(`${title.cohort}기_출석과제현황_${today.replace(/-/g, "")}`)}.hwpx`,
   };
 }
 

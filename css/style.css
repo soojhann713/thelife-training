@@ -575,6 +575,7 @@ html, body {
   position: relative;
   box-shadow: var(--shadow);
 }
+.modal-box-wide { max-width: 760px; }
 .modal-close {
   position: absolute;
   top: 12px;
@@ -674,15 +675,26 @@ html, body {
 }
 
 /* ===== 과제 취합문서 내보내기 모달 ===== */
+/* 머리말·버튼 줄은 고정하고 가운데(고르는 곳 + 미리보기)만 스크롤합니다.
+   예전에는 미리보기에 max-height 를 줘서, 멤버가 많으면 표가 버튼 줄을 덮었습니다. */
+.export-body {
+  flex: 1 1 auto;
+  min-height: 0;          /* 이게 없으면 flex 항목이 안 줄어들어 아래 줄을 밀어냅니다 */
+  overflow: auto;
+  padding: 16px 22px 4px;
+}
 .export-picker {
   display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 8px 12px;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 10px 12px;
   align-items: center;
-  margin-bottom: 14px;
+  margin-bottom: 16px;
 }
-.export-label { font-size: 13px; font-weight: 600; color: #475569; }
-.export-preview { max-height: 46vh; overflow: auto; }
+.export-picker .login-select { width: 100%; min-width: 0; }
+.export-label { font-size: 13px; font-weight: 600; color: #475569; white-space: nowrap; }
+.export-preview { min-width: 0; }
+.export-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.export-foot .card-meta { min-width: 0; overflow-wrap: anywhere; }
 .export-meta { margin: 0 0 8px; font-size: 13px; color: #475569; }
 .export-warn {
   margin: 0 0 10px; padding: 8px 10px; border-radius: 6px;
@@ -699,3 +711,12 @@ html, body {
 .export-ok { color: #047857; font-weight: 600; }
 .export-partial { color: #b45309; font-weight: 600; }
 .export-miss { color: #94a3b8; }
+
+@media (max-width: 560px) {
+  .modal { padding: 10px; }
+  .export-body { padding: 14px 16px 4px; }
+  /* 좁은 화면에서는 라벨을 셀렉트 위로 올립니다 — 나란히 두면 셀렉트가 짜부라집니다. */
+  .export-picker { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .export-picker .export-label { margin-top: 6px; }
+  .export-table td:nth-child(3) { max-width: 160px; }
+}

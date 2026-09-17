@@ -147,20 +147,30 @@
 
       <!-- 과제 취합문서(.hwpx) 내보내기 모달 -->
       <div id="export-modal" class="modal" hidden>
-        <div class="modal-box" role="dialog" aria-modal="true">
+        <div class="modal-box modal-box-wide" role="dialog" aria-modal="true">
           <button id="export-modal-close" class="modal-close" type="button" aria-label="닫기">✕</button>
           <div class="modal-head">
-            <h3>📄 과제 취합문서 내보내기</h3>
-            <div class="card-meta">교회 양식(.hwpx)에 채워 내려받습니다 · 멤버 1명 = 페이지 1장</div>
+            <h3>📄 취합문서 내보내기</h3>
+            <div class="card-meta">교회 양식(.hwpx)을 그대로 써서 채워 내려받습니다</div>
           </div>
-          <div class="export-picker">
-            <label class="export-label" for="export-class">반</label>
-            <select id="export-class" class="login-select"></select>
-            <label class="export-label" for="export-task">과제</label>
-            <select id="export-task" class="login-select"></select>
+          <!-- 고르는 곳 + 미리보기는 한 덩어리로 스크롤합니다(아래 버튼 줄은 항상 보이게). -->
+          <div class="export-body">
+            <div class="export-picker">
+              <label class="export-label" for="export-kind">양식</label>
+              <select id="export-kind" class="login-select">
+                <option value="task">과제 취합문서 (멤버 1명 = 페이지 1장)</option>
+                <option value="status">출석·과제현황표 (주차별 체크리스트)</option>
+              </select>
+              <label class="export-label" for="export-class">반</label>
+              <select id="export-class" class="login-select"></select>
+              <label class="export-label" for="export-category" id="export-category-label">과제 종류</label>
+              <select id="export-category" class="login-select"></select>
+              <label class="export-label" for="export-task" id="export-task-label">과제</label>
+              <select id="export-task" class="login-select"></select>
+            </div>
+            <div id="export-preview" class="export-preview"></div>
           </div>
-          <div id="export-preview" class="export-preview"></div>
-          <div class="modal-foot assign-modal-foot">
+          <div class="modal-foot export-foot">
             <span id="export-status" class="card-meta"></span>
             <button id="export-run" class="btn btn-primary" type="button" disabled>내려받기</button>
           </div>
