@@ -17,6 +17,7 @@ on:
           - class-delete      # 반(또는 관리자) 계정 삭제
           - dedupe-posts      # 중복 글(num) 제거
           - diagnose          # 데이터 진단(월 분포/과거글/중복) 출력만
+          - audit-sermons     # 설교간증(예배은혜나눔) 자동 매칭 점검 — 출력만, member 로 한 명만 가능
           - seed-course       # 커리큘럼(assignments.js)을 /courses 에 병합 — course/force/prune/dry 사용
       admin_email:
         description: "set-admin/revoke-admin 시 대상 이메일"
@@ -39,7 +40,7 @@ on:
         required: false
         default: ""
       member:
-        description: "dedupe-posts 시 특정 멤버만 (비우면 전체)"
+        description: "dedupe-posts / audit-sermons 시 특정 멤버만 (비우면 전체)"
         required: false
         default: ""
       course:
@@ -106,6 +107,7 @@ jobs:
             class-create|class-admin|class-delete) npm run manage:class ;;
             dedupe-posts) npm run dedupe:posts ;;
             diagnose) npm run diagnose ;;
+            audit-sermons) npm run audit:sermons ;;
             seed-course) npm run seed:course ;;
             *) echo "알 수 없는 작업"; exit 1 ;;
           esac
